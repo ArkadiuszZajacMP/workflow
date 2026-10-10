@@ -108,6 +108,36 @@ describe('triageDraftHandler', () => {
     };
     await triageDraftHandler(ctx, job);
     expect(db.select().from(jobs).all().filter((j) => j.status === 'queued')).toHaveLength(0);
+    expect(getItem(db, item.id)?.triageState).toBe('checking_duplicates');
+    expect(listDuplicateCandidates(db, item.id)).toEqual([]);
+  });
+
+  it('stops if the item is dismissed during the Slack call', async () => {
+    const { item, job } = newTriageItem();
+    const thread = slack.threads.get('C1:1.0')!;
+    slack.getThread = async () => {
+      updateItem(db, item.id, { category: 'dismissed' });
+      return thread;
+    };
+    await triageDraftHandler(ctx, job);
+    expect(claude.calls).toEqual([]);
+    expect(getItem(db, item.id)).toMatchObject({ slackPermalink: null, slackThread: null, title: '' });
+  });
+
+  it('does nothing for an item that is not in a triage-draft state', async () => {
+    const item = seedItem(db, { triageState: 'drafting', slackChannel: 'C1', slackThreadTs: '1.0' });
+    enqueueJob(db, 'triage-draft', item.id, {}, 0);
+    await triageDraftHandler(ctx, claimNextJob(db, 0)!);
+    expect(claude.calls).toEqual([]);
+    expect(getItem(db, item.id)?.triageState).toBe('drafting');
+  });
+
+  it('completes a retried job for an item already in checking_duplicates', async () => {
+    const item = seedItem(db, { triageState: 'checking_duplicates', slackChannel: 'C1', slackThreadTs: '1.0', title: '' });
+    enqueueJob(db, 'triage-draft', item.id, {}, 0);
+    claude.respond('search-terms', { queries: ['csv export 500'] });
+    await triageDraftHandler(ctx, claimNextJob(db, 0)!);
+    expect(getItem(db, item.id)?.triageState).toBe('drafting');
   });
 });
 

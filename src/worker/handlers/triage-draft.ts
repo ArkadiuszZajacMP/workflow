@@ -14,10 +14,13 @@ export const triageDraftHandler: Handler = async (ctx, job) => {
   const item = getItem(db, job.itemId);
   if (!item || item.category === 'dismissed') return;
   if (!item.slackChannel || !item.slackThreadTs) throw new PermanentError(`Item #${item.id} has no Slack thread`);
+  if (item.triageState !== 'new' && item.triageState !== 'checking_duplicates') return;
   if (item.triageState === 'new') applyTriageEvent(db, item.id, { type: 'job_started' }, ctx.now());
 
   const thread = await slack.getThread(item.slackChannel, item.slackThreadTs);
   const permalink = item.slackPermalink ?? (await slack.getPermalink(item.slackChannel, item.slackThreadTs));
+  const fresh = getItem(db, item.id);
+  if (!fresh || fresh.category === 'dismissed') return;
   updateItem(db, item.id, { slackThread: thread, slackPermalink: permalink, title: titleFromText(thread[0]?.text ?? '') }, ctx.now());
   const threadText = formatThread(thread);
 
