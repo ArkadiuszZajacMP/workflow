@@ -10,17 +10,18 @@ export function StatusHeader({ status, now, showDismissed }: { status: QueueStat
       <h1 className="text-base font-semibold">workflow</h1>
       {SOURCES.map((source) => {
         const poll = status.polls.find((p) => p.source === source);
-        const lastOk = poll?.lastSuccessAt ? ` (last ok ${formatAge(poll.lastSuccessAt, now)} ago)` : '';
-        const text = poll?.lastError
-          ? `${source}: error \u2014 ${poll.lastError}${lastOk}`
-          : `${source}: ${poll?.lastSuccessAt ? `ok ${formatAge(poll.lastSuccessAt, now)} ago` : 'never'}`;
+        if (poll?.lastError) {
+          const lastOk = poll.lastSuccessAt ? ` (last ok ${formatAge(poll.lastSuccessAt, now)} ago)` : '';
+          return (
+            <span key={source} className="flex items-baseline text-destructive" title={poll.lastError}>
+              <span className="whitespace-nowrap">{`${source}: error${lastOk} \u2014\u00a0`}</span>
+              <span className="max-w-[24rem] truncate">{poll.lastError}</span>
+            </span>
+          );
+        }
         return (
-          <span
-            key={source}
-            className={`${poll?.lastError ? 'text-destructive' : 'text-muted-foreground'} max-w-[24rem] truncate`}
-            title={text}
-          >
-            {text}
+          <span key={source} className="text-muted-foreground">
+            {source}: {poll?.lastSuccessAt ? `ok ${formatAge(poll.lastSuccessAt, now)} ago` : 'never'}
           </span>
         );
       })}
