@@ -16,11 +16,23 @@ export function renderPrompt(template: string, vars: Record<string, string>): st
 }
 
 export function extractJson(text: string): unknown {
-  const unfenced = text.replace(/```(?:json)?/g, '');
-  const start = unfenced.indexOf('{');
-  const end = unfenced.lastIndexOf('}');
+  try {
+    return JSON.parse(text.trim());
+  } catch {
+    // Not bare JSON. Fall through to the fence and prose handling below.
+  }
+  const fenced = /^\s*```(?:json)?\s*([\s\S]*)\s*```\s*$/.exec(text);
+  if (fenced?.[1] !== undefined) {
+    try {
+      return JSON.parse(fenced[1]);
+    } catch {
+      // The fence did not wrap plain JSON. Fall through to the prose slice.
+    }
+  }
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
   if (start === -1 || end < start) throw new Error('No JSON object in reply');
-  return JSON.parse(unfenced.slice(start, end + 1));
+  return JSON.parse(text.slice(start, end + 1));
 }
 
 function parseOutput<T>(text: string, schema: z.ZodType<T>): { ok: true; value: T } | { ok: false; error: string } {

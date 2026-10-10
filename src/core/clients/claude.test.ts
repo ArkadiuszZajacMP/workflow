@@ -26,6 +26,13 @@ describe('extractJson', () => {
     expect(extractJson('Here you go:\n{"a":{"b":2}}\nThanks')).toEqual({ a: { b: 2 } });
     expect(() => extractJson('no json here')).toThrow();
   });
+
+  it('keeps code fences that sit inside JSON string values', () => {
+    // JSON escapes the newlines (\n) inside the string value, as a model would.
+    const problem = 'see:\n```\nError: boom\n```';
+    expect(extractJson('{"problem":"see:\\n```\\nError: boom\\n```"}')).toEqual({ problem });
+    expect(extractJson('```json\n{"problem":"see:\\n```\\nError: boom\\n```"}\n```')).toEqual({ problem });
+  });
 });
 
 describe('createClaudeClient', () => {
