@@ -1,8 +1,9 @@
 import { AutoRefresh } from '@/components/auto-refresh';
 import { Board } from '@/components/board';
+import { ItemSheet } from '@/components/item-sheet';
 import { StatusHeader } from '@/components/status-header';
 import { getDb } from '@/core/db/client';
-import { getQueueStatus, listItems } from '@/core/queries';
+import { getItemDetail, getQueueStatus, listItems } from '@/core/queries';
 import { BOARD_COLUMNS } from '@/lib/board';
 
 export const dynamic = 'force-dynamic';
@@ -16,6 +17,10 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
   const showDismissed = params.dismissed === '1';
   const base = showDismissed ? '/?dismissed=1&' : '/?';
 
+  const itemId = Number(params.item);
+  const detail = Number.isInteger(itemId) && itemId > 0 ? getItemDetail(db, itemId) : null;
+  const closeHref = showDismissed ? '/?dismissed=1' : '/';
+
   return (
     <div className="flex min-h-screen flex-col">
       <AutoRefresh />
@@ -28,6 +33,7 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
           now={now}
         />
       </main>
+      {detail && <ItemSheet detail={detail} closeHref={closeHref} />}
     </div>
   );
 }
