@@ -1,3 +1,4 @@
+import { MessageSquare, SquareKanban } from 'lucide-react';
 import Link from 'next/link';
 import type { Item } from '@/core/db/schema';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +11,17 @@ export function ItemCard({ item, href, now }: { item: Item; href: string; now: n
       <Card className="transition-colors hover:bg-muted/50">
         <CardContent className="space-y-2 p-3">
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span>{item.slackThreadTs ? 'Slack' : 'Linear'}</span>
+            {item.slackThreadTs ? (
+              <span>
+                <MessageSquare className="size-3.5" aria-hidden />
+                <span className="sr-only">Slack</span>
+              </span>
+            ) : (
+              <span>
+                <SquareKanban className="size-3.5" aria-hidden />
+                <span className="sr-only">Linear</span>
+              </span>
+            )}
             {item.linearIdentifier && <span className="font-mono">{item.linearIdentifier}</span>}
             <span className="ml-auto">{formatAge(item.createdAt, now)}</span>
           </div>

@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n web,worker -c blue,magenta \"npm:dev:web\" \"npm:dev:worker\"",
-    "dev:web": "next dev --hostname 127.0.0.1",
+    "dev:web": "next dev --webpack --hostname 127.0.0.1",
     "dev:worker": "node --watch --env-file-if-exists=.env --import tsx src/worker/main.ts",
     "build": "next build --webpack",
     "start:worker": "node --env-file-if-exists=.env --import tsx src/worker/main.ts",

@@ -10,9 +10,17 @@ export function StatusHeader({ status, now, showDismissed }: { status: QueueStat
       <h1 className="text-base font-semibold">workflow</h1>
       {SOURCES.map((source) => {
         const poll = status.polls.find((p) => p.source === source);
+        const lastOk = poll?.lastSuccessAt ? ` (last ok ${formatAge(poll.lastSuccessAt, now)} ago)` : '';
+        const text = poll?.lastError
+          ? `${source}: error \u2014 ${poll.lastError}${lastOk}`
+          : `${source}: ${poll?.lastSuccessAt ? `ok ${formatAge(poll.lastSuccessAt, now)} ago` : 'never'}`;
         return (
-          <span key={source} className={poll?.lastError ? 'text-destructive' : 'text-muted-foreground'} title={poll?.lastError ?? undefined}>
-            {source}: {poll?.lastError ? 'error' : poll?.lastSuccessAt ? `ok ${formatAge(poll.lastSuccessAt, now)} ago` : 'never'}
+          <span
+            key={source}
+            className={`${poll?.lastError ? 'text-destructive' : 'text-muted-foreground'} max-w-[24rem] truncate`}
+            title={text}
+          >
+            {text}
           </span>
         );
       })}
