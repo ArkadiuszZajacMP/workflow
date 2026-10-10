@@ -1,0 +1,19 @@
+import type { Db } from '../db/client';
+import type { Item } from '../db/schema';
+import { latestDraft } from '../drafts';
+import { ActionError } from '../errors';
+import { applyTriageEvent, logActivity, requireItem } from '../items';
+import { enqueueJob } from '../jobs/queue';
+import { assertNoActiveJob } from './guards';
+
+export function approve(db: Db, itemId: number, now = Date.now()): Item {
+  return db.transaction((tx) => {
+    requireItem(tx, itemId);
+    if (!latestDraft(tx, itemId)) throw new ActionError(`Item #${itemId} has no draft to approve`);
+    assertNoActiveJob(tx, itemId);
+    const item = applyTriageEvent(tx, itemId, { type: 'approved' }, now);
+    enqueueJob(tx, 'create-linear-issue', itemId, {}, now);
+    logActivity(tx, itemId, 'Draft approved, creating Linear issue', now);
+    return item;
+  });
+}
