@@ -1,0 +1,8 @@
+.claude/settings.local.json
+node_modules/
+.next/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env*.local
