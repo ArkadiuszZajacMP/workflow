@@ -1,0 +1,21 @@
+linear:
+  defaultTeam: ENG
+slack:
+  pollIntervalSeconds: 60
+  backfillOnFirstRun: false
+claude:
+  model: null
+triage:
+  duplicateThreshold: 0.7
+  searchClosedWithinDays: 90
+  maxCandidates: 15
+rules:
+  - when: { source: slack, reaction: eyes }
+    category: triage
+    action: triage-draft
+  - when: { source: slack, reaction: bookmark }
+    category: triage
+  - when: { source: linear, status: Triage }
+    category: triage
+  - when: { source: linear, label: needs-investigation }
+    category: triage
