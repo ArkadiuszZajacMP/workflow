@@ -33,7 +33,7 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
           now={now}
         />
       </main>
-      {detail && <ItemSheet detail={detail} closeHref={closeHref} />}
+      {detail && <ItemSheet key={detail.item.id} detail={detail} closeHref={closeHref} />}
     </div>
   );
 }

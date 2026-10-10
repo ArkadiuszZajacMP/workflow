@@ -18,9 +18,15 @@ export function ItemControls({ item, flags }: { item: Item; flags: ItemActionFla
   const { pending, error, run } = useActionRunner();
   return (
     <section className="space-y-3">
-      {item.lastError && (
-        <div className="flex items-center gap-3 rounded-md border border-destructive p-3 text-sm text-destructive">
-          <span className="flex-1">{item.lastError}</span>
+      {(item.lastError || flags.canRetry) && (
+        <div
+          className={
+            item.lastError
+              ? 'flex items-center gap-3 rounded-md border border-destructive p-3 text-sm text-destructive'
+              : 'flex items-center gap-3'
+          }
+        >
+          {item.lastError && <span className="flex-1">{item.lastError}</span>}
           {flags.canRetry && (
             <Button size="sm" variant="destructive" disabled={pending} onClick={() => run(() => retryAction(item.id))}>
               Retry
