@@ -64,6 +64,18 @@ describe('createLinearIssueHandler', () => {
     expect(getItem(db, item.id)?.triageState).toBe('linked');
   });
 
+  it('does not create a second issue when the create response was lost', async () => {
+    const { item, job } = approvedItem();
+    linear.loseNextCreateResponse = true;
+    await expect(createLinearIssueHandler(ctx, job)).rejects.toThrow('timeout');
+    expect(getItem(db, item.id)?.linearIssueId).toBeNull();
+
+    await createLinearIssueHandler(ctx, job);
+    expect(linear.created).toHaveLength(1);
+    expect(linear.attached).toEqual([{ issueId: 'issue-100', url: PERMALINK, title: 'Slack thread' }]);
+    expect(getItem(db, item.id)).toMatchObject({ triageState: 'linked', linearIssueId: 'issue-100' });
+  });
+
   it('records the created issue but does not link when dismissed during the Linear calls', async () => {
     const { item, job } = approvedItem();
     const attach = linear.attachUrl.bind(linear);

@@ -9,7 +9,7 @@ import type {
   SlackReactionItem,
 } from '@/core/clients/types';
 import { type Config, configSchema } from '@/core/config/schema';
-import { PermanentError } from '@/core/errors';
+import { PermanentError, TransientError } from '@/core/errors';
 import type { LinearIssueRef, ThreadMessage } from '@/core/types';
 
 export const TEST_CONFIG: Config = configSchema.parse({
@@ -58,6 +58,8 @@ export class FakeLinear implements LinearClient {
   issues = new Map<string, LinearIssueRef>();
   attachmentsByUrl = new Map<string, LinearIssueRef>();
   created: { teamId: string; title: string; description: string }[] = [];
+  createdIssues: (LinearIssueRef & { description: string })[] = [];
+  loseNextCreateResponse = false;
   attached: { issueId: string; url: string; title: string }[] = [];
   failures: Partial<Record<keyof LinearClient, Error>> = {};
   private nextNumber = 100;
@@ -114,7 +116,18 @@ export class FakeLinear implements LinearClient {
     const n = this.nextNumber++;
     const ref = { id: `issue-${n}`, identifier: `ENG-${n}`, title: input.title, url: `https://linear.test/ENG-${n}` };
     this.addIssue(ref);
+    this.createdIssues.push({ ...ref, description: input.description });
+    if (this.loseNextCreateResponse) {
+      this.loseNextCreateResponse = false;
+      throw new TransientError('timeout');
+    }
     return ref;
+  }
+
+  async findMyRecentIssue(_teamKey: string, title: string, description: string, _sinceIso: string) {
+    this.maybeFail('findMyRecentIssue');
+    const hit = this.createdIssues.find((i) => i.title === title && i.description.trim() === description.trim());
+    return hit ? { id: hit.id, identifier: hit.identifier, title: hit.title, url: hit.url } : null;
   }
 
   async attachUrl(issueId: string, url: string, title: string) {

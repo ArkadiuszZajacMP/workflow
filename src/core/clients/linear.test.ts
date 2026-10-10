@@ -52,6 +52,20 @@ describe('createLinearClient', () => {
     expect(bodyOf(fetchFn).variables).toMatchObject({ term: 'export', first: 15, filter: { team: { key: { eq: 'ENG' } } } });
   });
 
+  it('finds a recent own issue by title and exact trimmed description', async () => {
+    const nodes = [
+      { id: 'a', identifier: 'ENG-1', title: 'T', url: 'ua', description: 'other' },
+      { id: 'b', identifier: 'ENG-2', title: 'T', url: 'ub', description: 'body\n' },
+    ];
+    const fetchFn = fakeFetch({ body: { data: { issues: { nodes } } } }, { body: { data: { issues: { nodes } } } });
+    const client = createLinearClient('key', fetchFn as unknown as typeof fetch);
+    const since = '2026-10-09T00:00:00.000Z';
+    expect(await client.findMyRecentIssue('ENG', 'T', 'body', since)).toEqual({ id: 'b', identifier: 'ENG-2', title: 'T', url: 'ub' });
+    expect(bodyOf(fetchFn).variables).toEqual({ teamKey: 'ENG', title: 'T', since });
+    expect(bodyOf(fetchFn).query).toContain('creator: { isMe: { eq: true } }');
+    expect(await client.findMyRecentIssue('ENG', 'T', 'different', since)).toBeNull();
+  });
+
   it('turns 429 into TransientError with Retry-After', async () => {
     const fetchFn = fakeFetch({ status: 429, headers: { 'retry-after': '20' } });
     const err = await createLinearClient('key', fetchFn as unknown as typeof fetch).viewer().catch((e) => e);

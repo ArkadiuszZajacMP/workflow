@@ -18,10 +18,23 @@ export const createLinearIssueHandler: Handler = async (ctx, job) => {
       ? { id: item.linearIssueId, identifier: item.linearIdentifier, title: draft.title, url: item.linearUrl }
       : null;
   let message = issue ? `Created ${issue.identifier} in Linear` : '';
+  let alreadyAttached = false;
 
   if (!issue) {
     issue = await linear.findIssueByAttachmentUrl(item.slackPermalink);
-    if (issue) message = `Linked existing ${issue.identifier} (thread already attached)`;
+    if (issue) {
+      message = `Linked existing ${issue.identifier} (thread already attached)`;
+      alreadyAttached = true;
+    }
+  }
+  if (!issue) {
+    // A create whose response was lost (timeout) leaves an issue we never recorded. Look for it every time.
+    const since = new Date(ctx.now() - 86_400_000).toISOString();
+    issue = await linear.findMyRecentIssue(config.linear.defaultTeam, draft.title, renderIssueDescription(draft), since);
+    if (issue) {
+      claimLinearIssue(db, item.id, issue, ctx.now());
+      message = `Created ${issue.identifier} in Linear`;
+    }
   }
   if (!issue) {
     const teamId = await linear.getTeamId(config.linear.defaultTeam);
@@ -29,7 +42,7 @@ export const createLinearIssueHandler: Handler = async (ctx, job) => {
     claimLinearIssue(db, item.id, issue, ctx.now());
     message = `Created ${issue.identifier} in Linear`;
   }
-  if (!message.startsWith('Linked existing')) {
+  if (!alreadyAttached) {
     await linear.attachUrl(issue.id, item.slackPermalink, 'Slack thread');
   }
 

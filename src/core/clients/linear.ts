@@ -30,6 +30,12 @@ const ATTACH = `mutation Attach($issueId: String!, $url: String!, $title: String
 }`;
 const FOR_URL = `query ForUrl($url: String!) { attachmentsForURL(url: $url) { nodes { issue { ${ISSUE_REF} } } } }`;
 
+const RECENT = `query Recent($teamKey: String!, $title: String!, $since: DateTimeOrDuration!) {
+  issues(filter: { team: { key: { eq: $teamKey } }, creator: { isMe: { eq: true } }, title: { eq: $title }, createdAt: { gte: $since } }, first: 10) {
+    nodes { ${ISSUE_REF} description }
+  }
+}`;
+
 type GqlError = { message: string; extensions?: { code?: string } };
 
 function retryAfterMs(res: Response): number | undefined {
@@ -146,6 +152,16 @@ export function createLinearClient(apiKey: string, fetchImpl: typeof fetch = fet
     async findIssueByAttachmentUrl(url) {
       const data = await gql<{ attachmentsForURL: { nodes: { issue: LinearIssueRef }[] } }>(FOR_URL, { url });
       return data.attachmentsForURL.nodes[0]?.issue ?? null;
+    },
+
+    async findMyRecentIssue(teamKey, title, description, sinceIso) {
+      const data = await gql<{ issues: { nodes: (LinearIssueRef & { description: string | null })[] } }>(RECENT, {
+        teamKey,
+        title,
+        since: sinceIso,
+      });
+      const match = data.issues.nodes.find((n) => (n.description ?? '').trim() === description.trim());
+      return match ? { id: match.id, identifier: match.identifier, title: match.title, url: match.url } : null;
     },
   };
 }

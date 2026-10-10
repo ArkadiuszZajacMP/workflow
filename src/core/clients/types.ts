@@ -20,6 +20,7 @@ export interface LinearClient {
   createIssue(input: { teamId: string; title: string; description: string }): Promise<LinearIssueRef>;
   attachUrl(issueId: string, url: string, title: string): Promise<void>;
   findIssueByAttachmentUrl(url: string): Promise<LinearIssueRef | null>;
+  findMyRecentIssue(teamKey: string, title: string, description: string, sinceIso: string): Promise<LinearIssueRef | null>;
 }
 
 export type PromptName = 'search-terms' | 'assess-duplicates' | 'draft';
