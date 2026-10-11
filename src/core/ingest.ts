@@ -3,8 +3,17 @@ import type { Rule } from './config/schema';
 import type { Db } from './db/client';
 import { type Item, sourceEvents } from './db/schema';
 import type { SourceEvent } from './events';
-import { getItem, logActivity, updateItem, upsertLinearItem, upsertSlackItem } from './items';
+import {
+  findItemByLinearIssue,
+  findItemBySlackThread,
+  getItem,
+  logActivity,
+  updateItem,
+  upsertLinearItem,
+  upsertSlackItem,
+} from './items';
 import { enqueueJob } from './jobs/queue';
+import { rearmStrandedJob } from './jobs/rearm';
 import { matchRule, type RuleMatch } from './rules/match';
 
 export type IngestResult = { inserted: boolean; item: Item | null };
@@ -37,6 +46,10 @@ export function ingestEvent(
 }
 
 function applyRuleMatch(db: Db, event: SourceEvent, eventId: number, match: RuleMatch, now: number): Item {
+  const before =
+    event.source === 'slack'
+      ? findItemBySlackThread(db, event.channel, event.threadTs)
+      : findItemByLinearIssue(db, event.issue.id);
   const item =
     event.source === 'slack'
       ? upsertSlackItem(db, { channel: event.channel, threadTs: event.threadTs }, match.category, now)
@@ -46,6 +59,9 @@ function applyRuleMatch(db: Db, event: SourceEvent, eventId: number, match: Rule
   if (match.action === 'triage-draft' && item.triageState === null) {
     updateItem(db, item.id, { triageState: 'new' }, now);
     enqueueJob(db, 'triage-draft', item.id, {}, now);
+  } else if (before?.category === 'dismissed' && item.category !== 'dismissed') {
+    const job = rearmStrandedJob(db, item, now);
+    if (job) logActivity(db, item.id, `Resuming ${job.type}`, now);
   }
   return getItem(db, item.id)!;
 }

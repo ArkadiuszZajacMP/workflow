@@ -12,14 +12,16 @@ export type ItemActionFlags = {
 const JOB_DRIVEN = ['new', 'checking_duplicates', 'drafting', 'creating_issue'];
 
 export function itemActionFlags(item: Pick<Item, 'triageState' | 'category'>, activeJob: boolean): ItemActionFlags {
-  const busy = activeJob || JOB_DRIVEN.includes(item.triageState ?? '');
-  const state = busy ? null : item.triageState;
+  const dismissed = item.category === 'dismissed';
+  // Handlers skip dismissed items, so a job-driven state only means work is happening when not dismissed.
+  const busy = activeJob || (!dismissed && JOB_DRIVEN.includes(item.triageState ?? ''));
+  const state = busy || dismissed ? null : item.triageState;
   return {
     busy,
     canResolveDuplicate: state === 'duplicate_suspected',
     canEditDraft: state === 'draft_ready',
     canLink: state === 'duplicate_suspected' || state === 'draft_ready',
     canRetry: state === 'failed',
-    canDiscard: item.category !== 'dismissed',
+    canDiscard: !dismissed,
   };
 }

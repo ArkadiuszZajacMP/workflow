@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Rule } from '@/core/config/schema';
 import type { Db } from '@/core/db/client';
-import { jobs, sourceEvents } from '@/core/db/schema';
+import { eq } from 'drizzle-orm';
+import { items, jobs, sourceEvents } from '@/core/db/schema';
 import type { LinearStatusEvent, SlackReactionEvent } from '@/core/events';
 import { createTestDb } from '@/test/db';
 import { ingestEvent } from './ingest';
@@ -40,6 +41,20 @@ describe('ingestEvent', () => {
     const reply = ingestEvent(db, eyes('1.5'), 'slack:C1:1.5:eyes', rules, 20);
     expect(reply.item?.id).toBe(first.item?.id);
     expect(db.select().from(jobs).all()).toHaveLength(1);
+  });
+
+  it('re-arms triage when a 👀 brings back a dismissed item stranded in new', () => {
+    const first = ingestEvent(db, eyes('1.0'), 'slack:C1:1.0:eyes', rules, 10);
+    const itemId = first.item!.id;
+    db.update(items).set({ category: 'dismissed' }).where(eq(items.id, itemId)).run();
+    db.update(jobs).set({ status: 'done' }).run(); // the handler skipped the dismissed item
+
+    const again = ingestEvent(db, eyes('1.5'), 'slack:C1:1.5:eyes', rules, 20);
+    expect(again.item).toMatchObject({ id: itemId, category: 'triage', triageState: 'new' });
+    expect(db.select().from(jobs).all()).toMatchObject([
+      { type: 'triage-draft', status: 'done' },
+      { type: 'triage-draft', status: 'queued', itemId },
+    ]);
   });
 
   it('records unmatched events without creating items', () => {

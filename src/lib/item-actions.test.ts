@@ -25,4 +25,16 @@ describe('itemActionFlags', () => {
   it('cannot discard what is already dismissed', () => {
     expect(itemActionFlags({ triageState: null, category: 'dismissed' }, false).canDiscard).toBe(false);
   });
+
+  it('offers no triage actions for a dismissed item', () => {
+    for (const triageState of ['draft_ready', 'duplicate_suspected', 'failed'] as const) {
+      expect(itemActionFlags({ triageState, category: 'dismissed' }, false)).toEqual({
+        busy: false, canResolveDuplicate: false, canEditDraft: false, canLink: false, canRetry: false, canDiscard: false,
+      });
+    }
+  });
+
+  it('does not show a dismissed item in a job-driven state as working when no job is active', () => {
+    expect(itemActionFlags({ triageState: 'drafting', category: 'dismissed' }, false).busy).toBe(false);
+  });
 });

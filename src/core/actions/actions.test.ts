@@ -4,7 +4,7 @@ import { jobs } from '@/core/db/schema';
 import { latestDraft, saveDraft } from '@/core/drafts';
 import { ActionError, PermanentError } from '@/core/errors';
 import { getItem, markItemFailed } from '@/core/items';
-import { claimNextJob, enqueueJob, failJob } from '@/core/jobs/queue';
+import { claimNextJob, completeJob, enqueueJob, failJob } from '@/core/jobs/queue';
 import { createTestDb } from '@/test/db';
 import { seedItem } from '@/test/seed';
 import { approve, discard, editDraft, link, move, notDuplicate, retry, revise } from './index';
@@ -104,6 +104,64 @@ describe('discard and move', () => {
     const item = seedItem(db);
     expect(move(db, item.id, 'in_progress').category).toBe('in_progress');
     expect(() => move(db, item.id, 'archived' as never)).toThrow(/Unknown category/);
+  });
+});
+
+describe('dismissed items', () => {
+  it('refuses every triage action', () => {
+    const ready = draftReadyItem();
+    discard(db, ready.id);
+    expect(() => approve(db, ready.id)).toThrow(`Item #${ready.id} is dismissed`);
+    expect(() => editDraft(db, ready.id, content)).toThrow(/is dismissed/);
+    expect(() => revise(db, ready.id, 'more detail')).toThrow(/is dismissed/);
+    expect(() => link(db, ready.id, { identifier: 'ENG-1' })).toThrow(/is dismissed/);
+    const dup = seedItem(db, { triageState: 'duplicate_suspected', category: 'dismissed' });
+    expect(() => notDuplicate(db, dup.id)).toThrow(/is dismissed/);
+    const failed = seedItem(db, { triageState: 'failed', failedFromState: 'drafting', category: 'dismissed' });
+    expect(() => retry(db, failed.id)).toThrow(/is dismissed/);
+    expect(allJobs()).toEqual([]);
+  });
+
+  it('re-arms a stranded create job with the same issue UUID when moved out of dismissed', () => {
+    const item = draftReadyItem();
+    approve(db, item.id, 5);
+    const first = claimNextJob(db, 6)!;
+    discard(db, item.id, 7);
+    completeJob(db, first.id, 8); // the handler saw the item dismissed and did nothing
+
+    move(db, item.id, 'triage', 9);
+    const jobsNow = allJobs();
+    expect(jobsNow).toHaveLength(2);
+    expect(jobsNow[1]).toMatchObject({ type: 'create-linear-issue', status: 'queued', payload: first.payload });
+  });
+
+  it('re-arms a stranded draft job, keeping the revision feedback', () => {
+    const item = draftReadyItem();
+    revise(db, item.id, 'focus on mobile', 5);
+    const first = claimNextJob(db, 6)!;
+    discard(db, item.id, 7);
+    completeJob(db, first.id, 8);
+
+    move(db, item.id, 'in_progress', 9);
+    expect(allJobs()[1]).toMatchObject({ type: 'draft', status: 'queued', payload: { feedback: 'focus on mobile' } });
+  });
+
+  it('generates a new UUID when there is no earlier create job to reuse', () => {
+    const item = seedItem(db, { triageState: 'creating_issue', category: 'dismissed' });
+    move(db, item.id, 'triage', 9);
+    expect((allJobs()[0]?.payload as { issueUuid?: string }).issueUuid).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('does not enqueue a second job when one is still active, or for idle states', () => {
+    const item = draftReadyItem();
+    revise(db, item.id, 'more', 5);
+    discard(db, item.id, 6);
+    move(db, item.id, 'triage', 7);
+    expect(allJobs()).toHaveLength(1);
+
+    const idle = seedItem(db, { triageState: 'draft_ready', category: 'dismissed' });
+    move(db, idle.id, 'triage', 8);
+    expect(allJobs()).toHaveLength(1);
   });
 });
 

@@ -3,12 +3,13 @@ import type { Item } from '../db/schema';
 import { ActionError } from '../errors';
 import { applyTriageEvent, logActivity } from '../items';
 import { enqueueJob } from '../jobs/queue';
-import { assertNoActiveJob } from './guards';
+import { assertNoActiveJob, requireActiveItem } from './guards';
 
 export function revise(db: Db, itemId: number, feedback: string, now = Date.now()): Item {
   const trimmed = feedback.trim();
   if (!trimmed) throw new ActionError('Revision feedback cannot be empty');
   return db.transaction((tx) => {
+    requireActiveItem(tx, itemId);
     assertNoActiveJob(tx, itemId);
     const item = applyTriageEvent(tx, itemId, { type: 'revise_requested' }, now);
     enqueueJob(tx, 'draft', itemId, { feedback: trimmed }, now);

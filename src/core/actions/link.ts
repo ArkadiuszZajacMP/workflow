@@ -1,9 +1,9 @@
 import type { Db } from '../db/client';
 import type { Item } from '../db/schema';
 import { ActionError } from '../errors';
-import { logActivity, requireItem } from '../items';
+import { logActivity } from '../items';
 import { enqueueJob } from '../jobs/queue';
-import { assertNoActiveJob } from './guards';
+import { assertNoActiveJob, requireActiveItem } from './guards';
 
 const IDENTIFIER = /^[A-Z][A-Z0-9]*-\d+$/;
 const LINKABLE = ['duplicate_suspected', 'draft_ready'] as const;
@@ -12,7 +12,7 @@ export function link(db: Db, itemId: number, target: { identifier: string; issue
   const identifier = target.identifier.trim().toUpperCase();
   if (!IDENTIFIER.test(identifier)) throw new ActionError(`"${target.identifier}" is not a Linear identifier like ENG-123`);
   return db.transaction((tx) => {
-    const item = requireItem(tx, itemId);
+    const item = requireActiveItem(tx, itemId);
     if (!LINKABLE.includes(item.triageState as (typeof LINKABLE)[number])) {
       throw new ActionError(`Item #${itemId} can only be linked when a duplicate is suspected or a draft is ready`);
     }
