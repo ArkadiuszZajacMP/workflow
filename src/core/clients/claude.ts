@@ -61,22 +61,29 @@ export function createClaudeClient(opts: { complete: Complete; promptsDir?: stri
   };
 }
 
+export const CLAUDE_TIMEOUT_MS = 180_000;
+
 /** Runs one tool-less Claude Code turn with the user's Claude Code login. */
-export function sdkComplete(model: () => string | null): Complete {
+export function sdkComplete(model: () => string | null, timeoutMs = CLAUDE_TIMEOUT_MS): Complete {
   return async (prompt) => {
     let result: string | undefined;
+    const abortController = new AbortController();
+    const timer = setTimeout(() => abortController.abort(), timeoutMs);
     try {
       for await (const message of query({
         prompt,
-        options: { model: model() ?? undefined, maxTurns: 1, tools: [], allowedTools: [], settingSources: [] },
+        options: { model: model() ?? undefined, maxTurns: 1, tools: [], allowedTools: [], settingSources: [], abortController },
       })) {
         if (message.type !== 'result') continue;
         if (message.subtype !== 'success') throw new TransientError(`Claude run ended with ${message.subtype}`);
         result = message.result;
       }
     } catch (err) {
+      if (abortController.signal.aborted) throw new TransientError(`Claude timed out after ${timeoutMs / 1000}s`);
       if (err instanceof TransientError) throw err;
       throw new TransientError(`Claude request failed: ${errorMessage(err)}`);
+    } finally {
+      clearTimeout(timer);
     }
     if (result === undefined) throw new TransientError('Claude returned no result');
     return result;

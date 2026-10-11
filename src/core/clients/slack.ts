@@ -34,8 +34,10 @@ export function mapSlackError(err: unknown): Error {
   return new TransientError(`Slack request failed: ${errorMessage(err)}`);
 }
 
+export const SLACK_TIMEOUT_MS = 30_000;
+
 export function createSlackClient(token: string): SlackClient {
-  const web = new WebClient(token, { retryConfig: { retries: 0 }, rejectRateLimitedCalls: true });
+  const web = new WebClient(token, { timeout: SLACK_TIMEOUT_MS, retryConfig: { retries: 0 }, rejectRateLimitedCalls: true });
   const names = new Map<string, string>();
   let me: string | undefined;
 

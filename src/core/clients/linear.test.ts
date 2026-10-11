@@ -61,6 +61,31 @@ describe('createLinearClient', () => {
     expect(bodyOf(fetchFn).variables).toEqual({ input });
   });
 
+  it('sends every request with a timeout signal', async () => {
+    const fetchFn = fakeFetch({ body: { data: { viewer: { id: 'me', name: 'Me' } } } });
+    await createLinearClient('key', fetchFn as unknown as typeof fetch).viewer();
+    const init = (fetchFn.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it.each(['TimeoutError', 'AbortError'])('turns a %s from fetch into TransientError', async (name) => {
+    const fetchFn = vi.fn(async () => {
+      throw new DOMException('The operation was aborted due to timeout', name);
+    });
+    const err = await createLinearClient('key', fetchFn as unknown as typeof fetch).viewer().catch((e) => e);
+    expect(err).toBeInstanceOf(TransientError);
+    expect(err.message).toMatch(/timed out/);
+  });
+
+  it('turns a timeout while reading the response body into TransientError', async () => {
+    const res = new Response('{}', { status: 200 });
+    res.json = async () => {
+      throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    };
+    const fetchFn = vi.fn(async () => res);
+    await expect(createLinearClient('key', fetchFn as unknown as typeof fetch).viewer()).rejects.toBeInstanceOf(TransientError);
+  });
+
   it('turns 429 into TransientError with Retry-After', async () => {
     const fetchFn = fakeFetch({ status: 429, headers: { 'retry-after': '20' } });
     const err = await createLinearClient('key', fetchFn as unknown as typeof fetch).viewer().catch((e) => e);

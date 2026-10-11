@@ -32,6 +32,13 @@ const FOR_URL = `query ForUrl($url: String!) { attachmentsForURL(url: $url) { no
 
 type GqlError = { message: string; extensions?: { code?: string } };
 
+export const LINEAR_TIMEOUT_MS = 30_000;
+
+function isTimeout(err: unknown): boolean {
+  const name = (err as { name?: unknown })?.name;
+  return name === 'TimeoutError' || name === 'AbortError';
+}
+
 function retryAfterMs(res: Response): number | undefined {
   const value = Number(res.headers.get('retry-after'));
   return Number.isFinite(value) && value > 0 ? value * 1000 : undefined;
@@ -45,14 +52,19 @@ export function createLinearClient(apiKey: string, fetchImpl: typeof fetch = fet
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: apiKey },
         body: JSON.stringify({ query, variables }),
+        signal: AbortSignal.timeout(LINEAR_TIMEOUT_MS),
       });
     } catch (err) {
+      if (isTimeout(err)) throw new TransientError(`Linear request timed out after ${LINEAR_TIMEOUT_MS / 1000}s`);
       throw new TransientError(`Linear request failed: ${errorMessage(err)}`);
     }
     if (res.status === 429) throw new TransientError('Linear rate limited', retryAfterMs(res));
     if (res.status >= 500) throw new TransientError(`Linear server error ${res.status}`);
 
-    const body = (await res.json().catch(() => ({}))) as { data?: T; errors?: GqlError[] };
+    const body = (await res.json().catch((err: unknown) => {
+      if (isTimeout(err)) throw new TransientError(`Linear request timed out after ${LINEAR_TIMEOUT_MS / 1000}s`);
+      return {};
+    })) as { data?: T; errors?: GqlError[] };
     if (body.errors?.length) {
       const message = body.errors.map((e) => e.message).join('; ');
       if (body.errors.some((e) => e.extensions?.code === 'RATELIMITED')) {

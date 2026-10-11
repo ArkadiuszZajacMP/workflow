@@ -2,9 +2,39 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { PermanentError } from '@/core/errors';
+import { PermanentError, TransientError } from '@/core/errors';
 import { draftSchema, searchTermsSchema } from '@/core/triage/schemas';
-import { createClaudeClient, extractJson, renderPrompt } from './claude';
+import { createClaudeClient, extractJson, renderPrompt, sdkComplete } from './claude';
+
+type QueryArgs = { prompt: string; options: { abortController?: AbortController; env?: Record<string, string | undefined> } };
+const sdk = vi.hoisted(() => ({ calls: [] as unknown[], impl: null as null | ((args: unknown) => AsyncGenerator<unknown>) }));
+vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
+  query: (args: unknown) => {
+    sdk.calls.push(args);
+    return sdk.impl!(args);
+  },
+}));
+
+describe('sdkComplete', () => {
+  it('returns the result and passes an abort controller', async () => {
+    sdk.impl = async function* () {
+      yield { type: 'result', subtype: 'success', result: '{"ok":true}' };
+    };
+    await expect(sdkComplete(() => null)('hi')).resolves.toBe('{"ok":true}');
+    expect((sdk.calls.at(-1) as QueryArgs).options.abortController).toBeInstanceOf(AbortController);
+  });
+
+  it('aborts a run that takes too long and reports it as transient', async () => {
+    sdk.impl = async function* (args) {
+      const signal = (args as QueryArgs).options.abortController!.signal;
+      await new Promise((_, reject) => signal.addEventListener('abort', () => reject(new Error('Claude Code process aborted by user'))));
+      yield { type: 'result', subtype: 'success', result: 'late' };
+    };
+    const err = await sdkComplete(() => null, 20)('hi').catch((e) => e);
+    expect(err).toBeInstanceOf(TransientError);
+    expect(err.message).toBe('Claude timed out after 0.02s');
+  });
+});
 
 function promptsDir() {
   const dir = mkdtempSync(path.join(tmpdir(), 'prompts-'));

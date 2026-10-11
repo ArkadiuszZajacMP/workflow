@@ -1,7 +1,27 @@
 import { ErrorCode } from '@slack/web-api';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { PermanentError, TransientError } from '@/core/errors';
-import { mapSlackError, toReactionItems } from './slack';
+import { createSlackClient, mapSlackError, toReactionItems } from './slack';
+
+const webClientOptions = vi.hoisted(() => [] as unknown[]);
+vi.mock('@slack/web-api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@slack/web-api')>();
+  return {
+    ...actual,
+    WebClient: class {
+      constructor(_token: string, options: unknown) {
+        webClientOptions.push(options);
+      }
+    },
+  };
+});
+
+describe('createSlackClient', () => {
+  it('gives every request a 30 second timeout and no built-in retries', () => {
+    createSlackClient('xoxp-test');
+    expect(webClientOptions.at(-1)).toMatchObject({ timeout: 30_000, retryConfig: { retries: 0 } });
+  });
+});
 
 describe('toReactionItems', () => {
   it('keeps only messages with reactions by me and resolves the thread root', () => {
