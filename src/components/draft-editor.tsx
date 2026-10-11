@@ -52,8 +52,8 @@ function DraftView({ draft }: { draft: Draft }) {
       <p className="font-medium">{draft.title}</p>
       <p className="whitespace-pre-wrap">{draft.problem}</p>
       <ul className="list-disc pl-5">
-        {draft.acceptanceCriteria.map((c) => (
-          <li key={c}>{c}</li>
+        {draft.acceptanceCriteria.map((c, i) => (
+          <li key={i}>{c}</li>
         ))}
       </ul>
       {draft.feedback && <p className="text-muted-foreground">Feedback: {draft.feedback}</p>}
