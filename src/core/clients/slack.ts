@@ -27,10 +27,17 @@ export function toReactionItems(raw: RawReactionItem[], me: string): SlackReacti
   return result;
 }
 
+/** Platform errors that report a Slack-side problem, not a bad request. Worth retrying later. */
+const TRANSIENT_PLATFORM_ERRORS = new Set(['internal_error', 'fatal_error', 'service_unavailable', 'request_timeout', 'ratelimited']);
+
 export function mapSlackError(err: unknown): Error {
   const e = err as { code?: string; retryAfter?: number; data?: { error?: string } };
   if (e?.code === ErrorCode.RateLimitedError) return new TransientError('Slack rate limited', (e.retryAfter ?? 30) * 1000);
-  if (e?.code === ErrorCode.PlatformError) return new PermanentError(`Slack API error: ${e.data?.error ?? 'unknown'}`);
+  if (e?.code === ErrorCode.PlatformError) {
+    const code = e.data?.error ?? 'unknown';
+    const message = `Slack API error: ${code}`;
+    return TRANSIENT_PLATFORM_ERRORS.has(code) ? new TransientError(message) : new PermanentError(message);
+  }
   return new TransientError(`Slack request failed: ${errorMessage(err)}`);
 }
 

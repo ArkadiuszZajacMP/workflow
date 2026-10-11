@@ -62,6 +62,15 @@ describe('mapSlackError', () => {
     expect(err.message).toBe('Slack API error: channel_not_found');
   });
 
+  it.each(['internal_error', 'fatal_error', 'service_unavailable', 'request_timeout', 'ratelimited'])(
+    'maps the server-side platform error %s to TransientError',
+    (code) => {
+      const err = mapSlackError({ code: ErrorCode.PlatformError, data: { error: code } });
+      expect(err).toBeInstanceOf(TransientError);
+      expect(err.message).toBe(`Slack API error: ${code}`);
+    },
+  );
+
   it('treats anything else as transient', () => {
     expect(mapSlackError(new Error('ECONNRESET'))).toBeInstanceOf(TransientError);
   });
