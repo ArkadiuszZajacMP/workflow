@@ -63,6 +63,15 @@ export function createClaudeClient(opts: { complete: Complete; promptsDir?: stri
 
 export const CLAUDE_TIMEOUT_MS = 180_000;
 
+/** Secrets the Claude subprocess never needs. It runs tool-less, but keep them out of its environment anyway. */
+const SECRET_ENV_KEYS = ['SLACK_USER_TOKEN', 'LINEAR_API_KEY'];
+
+function claudeEnv(): Record<string, string | undefined> {
+  const env = { ...process.env };
+  for (const key of SECRET_ENV_KEYS) delete env[key];
+  return env;
+}
+
 /** Runs one tool-less Claude Code turn with the user's Claude Code login. */
 export function sdkComplete(model: () => string | null, timeoutMs = CLAUDE_TIMEOUT_MS): Complete {
   return async (prompt) => {
@@ -72,7 +81,7 @@ export function sdkComplete(model: () => string | null, timeoutMs = CLAUDE_TIMEO
     try {
       for await (const message of query({
         prompt,
-        options: { model: model() ?? undefined, maxTurns: 1, tools: [], allowedTools: [], settingSources: [], abortController },
+        options: { model: model() ?? undefined, maxTurns: 1, tools: [], allowedTools: [], settingSources: [], abortController, env: claudeEnv() },
       })) {
         if (message.type !== 'result') continue;
         if (message.subtype !== 'success') throw new TransientError(`Claude run ended with ${message.subtype}`);

@@ -24,6 +24,25 @@ describe('sdkComplete', () => {
     expect((sdk.calls.at(-1) as QueryArgs).options.abortController).toBeInstanceOf(AbortController);
   });
 
+  it('does not hand the Slack and Linear secrets to the Claude subprocess', async () => {
+    vi.stubEnv('SLACK_USER_TOKEN', 'xoxp-secret');
+    vi.stubEnv('LINEAR_API_KEY', 'lin_secret');
+    vi.stubEnv('WORKFLOW_MARKER', 'kept');
+    sdk.impl = async function* () {
+      yield { type: 'result', subtype: 'success', result: 'ok' };
+    };
+    try {
+      await sdkComplete(() => null)('hi');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+    const env = (sdk.calls.at(-1) as QueryArgs).options.env;
+    expect(env).toBeDefined();
+    expect(env).not.toHaveProperty('SLACK_USER_TOKEN');
+    expect(env).not.toHaveProperty('LINEAR_API_KEY');
+    expect(env?.WORKFLOW_MARKER).toBe('kept');
+  });
+
   it('aborts a run that takes too long and reports it as transient', async () => {
     sdk.impl = async function* (args) {
       const signal = (args as QueryArgs).options.abortController!.signal;
