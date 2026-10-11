@@ -5,8 +5,8 @@ import { type PollSource, recordPollError, recordPollSuccess } from '@/core/curs
 import type { Db } from '@/core/db/client';
 import type { JobType } from '@/core/db/schema';
 import { errorMessage } from '@/core/errors';
-import { getItem, logActivity, markItemFailed } from '@/core/items';
-import { claimNextJob, completeJob, failJob } from '@/core/jobs/queue';
+import { getItem, logActivity, markItemFailed, updateItem } from '@/core/items';
+import { claimNextJob, completeJob, failJob, jobPayload } from '@/core/jobs/queue';
 import { createLinearIssueHandler } from './handlers/create-linear-issue';
 import { draftHandler } from './handlers/draft';
 import { linkLinearIssueHandler } from './handlers/link-linear-issue';
@@ -33,7 +33,14 @@ export async function runNextJob(ctx: HandlerContext, handlers: Record<JobType, 
     const message = errorMessage(err);
     const now = ctx.now();
     if (failJob(ctx.db, job, err, now) === 'failed') {
-      markItemFailed(ctx.db, job.itemId, startState, message, now);
+      if (job.type === 'link-linear-issue') {
+        // Linking starts from a state where the user is choosing. Keep it, so they can pick again.
+        const { identifier } = jobPayload(job as typeof job & { type: 'link-linear-issue' });
+        updateItem(ctx.db, job.itemId, { lastError: message }, now);
+        logActivity(ctx.db, job.itemId, `Link to ${identifier} failed: ${message}`, now);
+      } else {
+        markItemFailed(ctx.db, job.itemId, startState, message, now);
+      }
     } else {
       logActivity(ctx.db, job.itemId, `Retrying ${job.type} later: ${message}`, now);
     }

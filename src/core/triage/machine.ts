@@ -27,10 +27,8 @@ const TABLE: Record<SimpleEvent, { from: readonly TriageState[]; to: TriageState
   revise_requested: { from: ['draft_ready'], to: 'drafting' },
   approved: { from: ['draft_ready'], to: 'creating_issue' },
   issue_linked: { from: ['duplicate_suspected', 'draft_ready', 'creating_issue'], to: 'linked' },
-  job_failed: {
-    from: ['new', 'checking_duplicates', 'duplicate_suspected', 'drafting', 'draft_ready', 'creating_issue'],
-    to: 'failed',
-  },
+  // Only job-driven states fail. A failed link job leaves duplicate_suspected / draft_ready as they are.
+  job_failed: { from: ['new', 'checking_duplicates', 'drafting', 'creating_issue'], to: 'failed' },
 };
 
 export function transition(state: TriageState | null, event: TriageEvent): TransitionResult {

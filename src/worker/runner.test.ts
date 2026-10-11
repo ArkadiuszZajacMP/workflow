@@ -5,6 +5,8 @@ import type { Db } from '@/core/db/client';
 import { jobs } from '@/core/db/schema';
 import { PermanentError, TransientError } from '@/core/errors';
 import { getItem, listActivity } from '@/core/items';
+import { approve, link } from '@/core/actions';
+import { saveDraft } from '@/core/drafts';
 import { enqueueJob } from '@/core/jobs/queue';
 import { createTestDb } from '@/test/db';
 import { FakeClaude, FakeLinear, FakeSlack, TEST_CONFIG } from '@/test/fakes';
@@ -50,6 +52,29 @@ describe('runNextJob', () => {
       failedFromState: 'drafting',
       lastError: 'Claude returned invalid output for draft',
     });
+  });
+});
+
+describe('a failed link job', () => {
+  it('keeps the item pickable with lastError set, and a later approve clears the error', async () => {
+    const item = seedItem(db, { triageState: 'draft_ready', slackChannel: 'C1', slackThreadTs: '1.0', slackPermalink: 'p' });
+    saveDraft(db, item.id, { title: 'T', problem: 'P', acceptanceCriteria: ['A'] }, 'claude', null, 1);
+    link(db, item.id, { identifier: 'ENG-404' }, 0);
+    await runNextJob(ctx);
+
+    expect(getItem(db, item.id)).toMatchObject({
+      triageState: 'draft_ready',
+      failedFromState: null,
+      lastError: 'Linear issue ENG-404 not found',
+    });
+    expect(listActivity(db, item.id).at(-1)?.message).toBe('Link to ENG-404 failed: Linear issue ENG-404 not found');
+
+    expect(approve(db, item.id, 2)).toMatchObject({ triageState: 'creating_issue', lastError: null });
+  });
+
+  it('clears lastError when the user picks another issue to link', async () => {
+    const item = seedItem(db, { triageState: 'duplicate_suspected', lastError: 'Link to ENG-404 failed: not found' });
+    expect(link(db, item.id, { identifier: 'ENG-5' }, 0).lastError).toBeNull();
   });
 });
 

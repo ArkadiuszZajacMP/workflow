@@ -38,7 +38,7 @@ export function applyTriageEvent(db: Db, itemId: number, event: TriageEvent, now
   const item = requireItem(db, itemId);
   const result = transition(item.triageState, event);
   if (!result.ok) throw new ActionError(`Item #${itemId}: ${result.error}`);
-  return updateItem(db, itemId, { triageState: result.state }, now);
+  return updateItem(db, itemId, { triageState: result.state, lastError: null }, now);
 }
 
 export function findItemBySlackThread(db: Db, channel: string, threadTs: string): Item | undefined {
@@ -51,6 +51,14 @@ export function findItemBySlackThread(db: Db, channel: string, threadTs: string)
 
 export function findItemByLinearIssue(db: Db, issueId: string): Item | undefined {
   return db.select().from(items).where(eq(items.linearIssueId, issueId)).get();
+}
+
+/** Throws when `issue` already belongs to another Slack item. A Linear-only owner can be merged instead. */
+export function assertCanClaimLinearIssue(db: Db, itemId: number, issue: LinearIssueRef): void {
+  const owner = findItemByLinearIssue(db, issue.id);
+  if (owner && owner.id !== itemId && owner.slackThreadTs) {
+    throw new PermanentError(`${issue.identifier} is already linked to item #${owner.id}`);
+  }
 }
 
 export function upsertSlackItem(
@@ -92,11 +100,9 @@ export function upsertLinearItem(db: Db, issue: LinearIssueRef, category: Catego
  */
 export function claimLinearIssue(db: Db, itemId: number, issue: LinearIssueRef, now = Date.now()): void {
   db.transaction((tx) => {
+    assertCanClaimLinearIssue(tx, itemId, issue);
     const owner = findItemByLinearIssue(tx, issue.id);
     if (owner && owner.id !== itemId) {
-      if (owner.slackThreadTs) {
-        throw new PermanentError(`${issue.identifier} is already linked to item #${owner.id}`);
-      }
       updateItem(tx, owner.id, { linearIssueId: null, linearIdentifier: null, linearUrl: null, category: 'dismissed' }, now);
       logActivity(tx, owner.id, `Merged into item #${itemId}`, now);
     }

@@ -44,4 +44,9 @@ describe('transition', () => {
   it('does not fail an item that is already linked', () => {
     expect(transition('linked', { type: 'job_failed' }).ok).toBe(false);
   });
+
+  it('does not fail an item that is waiting for the user (a failed link leaves it pickable)', () => {
+    expect(transition('duplicate_suspected', { type: 'job_failed' }).ok).toBe(false);
+    expect(transition('draft_ready', { type: 'job_failed' }).ok).toBe(false);
+  });
 });

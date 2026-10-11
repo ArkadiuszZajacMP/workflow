@@ -1,5 +1,5 @@
 import { PermanentError } from '@/core/errors';
-import { applyTriageEvent, claimLinearIssue, getItem, logActivity } from '@/core/items';
+import { applyTriageEvent, assertCanClaimLinearIssue, claimLinearIssue, getItem, logActivity } from '@/core/items';
 import { jobPayload } from '@/core/jobs/queue';
 import type { Handler } from './types';
 
@@ -12,6 +12,8 @@ export const linkLinearIssueHandler: Handler = async (ctx, job) => {
   const payload = jobPayload(job as typeof job & { type: 'link-linear-issue' });
   const issue = await linear.getIssue(payload.issueId ?? payload.identifier);
   if (!issue) throw new PermanentError(`Linear issue ${payload.identifier} not found`);
+  // Refuse before attaching, so a claim that would fail leaves no stray attachment in Linear.
+  assertCanClaimLinearIssue(db, item.id, issue);
   if (item.slackPermalink) await linear.attachUrl(issue.id, item.slackPermalink, 'Slack thread');
 
   if (getItem(db, item.id)?.category === 'dismissed') return;

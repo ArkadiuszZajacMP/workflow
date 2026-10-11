@@ -131,6 +131,15 @@ describe('linkLinearIssueHandler', () => {
     await expect(linkLinearIssueHandler(ctx, job)).rejects.toBeInstanceOf(PermanentError);
   });
 
+  it('refuses an issue that another Slack item owns before attaching anything', async () => {
+    const ref = { id: 'i7', identifier: 'ENG-7', title: 'Export 500', url: 'u7' };
+    linear.addIssue(ref);
+    seedItem(db, { slackChannel: 'C2', slackThreadTs: '2.0', linearIssueId: 'i7', linearIdentifier: 'ENG-7', linearUrl: 'u7' });
+    const { job } = linkJob('draft_ready', 'ENG-7');
+    await expect(linkLinearIssueHandler(ctx, job)).rejects.toThrow(/already linked to item/);
+    expect(linear.attached).toEqual([]);
+  });
+
   it('merges the Linear-only item that the poller created for the same issue', async () => {
     const ref = { id: 'i7', identifier: 'ENG-7', title: 'Export 500', url: 'u7' };
     linear.addIssue(ref);

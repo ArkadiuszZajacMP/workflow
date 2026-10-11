@@ -1,7 +1,7 @@
 import type { Db } from '../db/client';
 import type { Item } from '../db/schema';
 import { ActionError } from '../errors';
-import { logActivity } from '../items';
+import { logActivity, updateItem } from '../items';
 import { enqueueJob } from '../jobs/queue';
 import { assertNoActiveJob, requireActiveItem } from './guards';
 
@@ -19,6 +19,6 @@ export function link(db: Db, itemId: number, target: { identifier: string; issue
     assertNoActiveJob(tx, itemId);
     enqueueJob(tx, 'link-linear-issue', itemId, target.issueId ? { identifier, issueId: target.issueId } : { identifier }, now);
     logActivity(tx, itemId, `Linking to ${identifier}`, now);
-    return item;
+    return item.lastError === null ? item : updateItem(tx, itemId, { lastError: null }, now);
   });
 }
