@@ -23,7 +23,8 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 async function main(): Promise<void> {
   const db = openDb(defaultDbPath());
   const recovered = recoverRunningJobs(db);
-  if (recovered > 0) console.log(`[worker] Requeued ${recovered} job(s) left running by a previous crash`);
+  if (recovered.requeued > 0) console.log(`[worker] Requeued ${recovered.requeued} job(s) left running by a previous crash`);
+  if (recovered.failed > 0) console.log(`[worker] Failed ${recovered.failed} crashed job(s) that were out of attempts`);
 
   const slack = createSlackClient(requireEnv('SLACK_USER_TOKEN'));
   const linear = createLinearClient(requireEnv('LINEAR_API_KEY'));

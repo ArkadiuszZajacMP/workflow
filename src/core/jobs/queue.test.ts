@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Db } from '@/core/db/client';
 import { jobs } from '@/core/db/schema';
 import { PermanentError, TransientError } from '@/core/errors';
+import { getItem } from '@/core/items';
 import { createTestDb } from '@/test/db';
 import { seedItem } from '@/test/seed';
 import {
@@ -13,6 +14,7 @@ import {
   failJob,
   hasActiveJob,
   latestFailedJob,
+  MAX_ATTEMPTS,
   recoverRunningJobs,
   requeueJob,
 } from './queue';
@@ -97,8 +99,25 @@ describe('job bookkeeping', () => {
   it('recovers running jobs after a crash', () => {
     enqueueJob(db, 'draft', itemId, {}, 0);
     const claimed = claimNextJob(db, 0)!;
-    expect(recoverRunningJobs(db, 10)).toBe(1);
+    expect(recoverRunningJobs(db, 10)).toEqual({ requeued: 1, failed: 0 });
     expect(getJob(claimed.id)).toMatchObject({ status: 'queued', runAfter: 10 });
+  });
+
+  it('fails a crashed job that is out of attempts, and its item, instead of requeueing it forever', () => {
+    const drafting = seedItem(db, { triageState: 'drafting', slackChannel: 'C9', slackThreadTs: '9.0' });
+    const exhausted = enqueueJob(db, 'draft', drafting.id, {}, 0);
+    const other = enqueueJob(db, 'triage-draft', itemId, {}, 0);
+    db.update(jobs).set({ status: 'running', attempts: MAX_ATTEMPTS }).where(eq(jobs.id, exhausted.id)).run();
+    db.update(jobs).set({ status: 'running', attempts: 1 }).where(eq(jobs.id, other.id)).run();
+
+    expect(recoverRunningJobs(db, 10)).toEqual({ requeued: 1, failed: 1 });
+    expect(getJob(exhausted.id)).toMatchObject({ status: 'failed', lastError: 'Worker crashed while running this job' });
+    expect(getJob(other.id)).toMatchObject({ status: 'queued', runAfter: 10 });
+    expect(getItem(db, drafting.id)).toMatchObject({
+      triageState: 'failed',
+      failedFromState: 'drafting',
+      lastError: 'Worker crashed while running this job',
+    });
   });
 
   it('requeues the latest failed job with a fresh attempt budget', () => {

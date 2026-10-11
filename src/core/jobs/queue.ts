@@ -1,7 +1,8 @@
-import { and, asc, desc, eq, inArray, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, lt, lte } from 'drizzle-orm';
 import type { Db } from '../db/client';
-import { type Job, type JobType, jobs } from '../db/schema';
+import { type Job, type JobType, jobs, type TriageState } from '../db/schema';
 import { errorMessage, PermanentError, TransientError } from '../errors';
+import { getItem, logActivity, markItemFailed, updateItem } from '../items';
 import { writeTransaction } from '../db/tx';
 
 export type JobPayloads = {
@@ -76,14 +77,46 @@ export function failJob(db: Db, job: Job, err: unknown, now = Date.now()): 'resc
   return 'failed';
 }
 
-/** Single worker: anything still `running` when the worker starts was orphaned by a crash. */
-export function recoverRunningJobs(db: Db, now = Date.now()): number {
-  return db
-    .update(jobs)
-    .set({ status: 'queued', runAfter: now, updatedAt: now })
-    .where(eq(jobs.status, 'running'))
-    .returning({ id: jobs.id })
-    .all().length;
+/**
+ * Records on the item that `job` failed for good. Linking starts from a state where the user is
+ * choosing, so a failed link keeps that state (they can pick again). Other jobs fail the item.
+ */
+export function recordJobFailure(db: Db, job: Job, startState: TriageState | null, message: string, now = Date.now()): void {
+  if (job.type === 'link-linear-issue') {
+    const { identifier } = jobPayload(job as Job & { type: 'link-linear-issue' });
+    updateItem(db, job.itemId, { lastError: message }, now);
+    logActivity(db, job.itemId, `Link to ${identifier} failed: ${message}`, now);
+  } else {
+    markItemFailed(db, job.itemId, startState, message, now);
+  }
+}
+
+export const CRASHED_MESSAGE = 'Worker crashed while running this job';
+
+/**
+ * Single worker: anything still `running` when the worker starts was orphaned by a crash.
+ * Jobs with attempts left are requeued. Jobs out of attempts fail, so a job that crashes the
+ * worker every time cannot loop forever.
+ */
+export function recoverRunningJobs(db: Db, now = Date.now()): { requeued: number; failed: number } {
+  return writeTransaction(db, (tx) => {
+    const exhausted = tx
+      .update(jobs)
+      .set({ status: 'failed', lastError: CRASHED_MESSAGE, updatedAt: now })
+      .where(and(eq(jobs.status, 'running'), gte(jobs.attempts, MAX_ATTEMPTS)))
+      .returning()
+      .all();
+    for (const job of exhausted) {
+      recordJobFailure(tx, job, getItem(tx, job.itemId)?.triageState ?? null, CRASHED_MESSAGE, now);
+    }
+    const requeued = tx
+      .update(jobs)
+      .set({ status: 'queued', runAfter: now, updatedAt: now })
+      .where(and(eq(jobs.status, 'running'), lt(jobs.attempts, MAX_ATTEMPTS)))
+      .returning({ id: jobs.id })
+      .all().length;
+    return { requeued, failed: exhausted.length };
+  });
 }
 
 export function hasActiveJob(db: Db, itemId: number): boolean {
