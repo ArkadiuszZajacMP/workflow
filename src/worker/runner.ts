@@ -32,10 +32,16 @@ export async function runNextJob(ctx: HandlerContext, handlers: Record<JobType, 
   } catch (err) {
     const message = errorMessage(err);
     const now = ctx.now();
-    if (failJob(ctx.db, job, err, now) === 'failed') {
-      recordJobFailure(ctx.db, job, startState, message, now);
-    } else {
-      logActivity(ctx.db, job.itemId, `Retrying ${job.type} later: ${message}`, now);
+    try {
+      if (failJob(ctx.db, job, err, now) === 'failed') {
+        recordJobFailure(ctx.db, job, startState, message, now);
+      } else {
+        logActivity(ctx.db, job.itemId, `Retrying ${job.type} later: ${message}`, now);
+      }
+    } catch (bookkeepingErr) {
+      // A DB error here (e.g. SQLITE_BUSY) must not crash the worker. The job stays `running`
+      // and crash recovery picks it up on the next start.
+      console.error(`[worker] Could not record the failure of job #${job.id}: ${errorMessage(bookkeepingErr)}`);
     }
   }
   return true;
