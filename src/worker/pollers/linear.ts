@@ -63,6 +63,7 @@ export async function pollLinear(
     after = page.hasNextPage && page.endCursor ? page.endCursor : undefined;
   } while (after);
 
-  recordPollSuccess(db, 'linear', newest, now);
+  // An empty first poll still ends first-run mode, so later polls ask only for changes since now.
+  recordPollSuccess(db, 'linear', newest ?? new Date(now).toISOString(), now);
   return { newEvents };
 }

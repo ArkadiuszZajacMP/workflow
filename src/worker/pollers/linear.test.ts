@@ -48,6 +48,15 @@ describe('pollLinear', () => {
     expect(linear.sinceCalls).toEqual([null, null]);
   });
 
+  it('leaves first-run mode after an empty first poll by recording the poll time as the cursor', async () => {
+    const now = Date.parse('2026-10-10T12:00:00.000Z');
+    await pollLinear({ db, linear, config: TEST_CONFIG }, now);
+    expect(getCursor(db, 'linear')?.cursor).toBe('2026-10-10T12:00:00.000Z');
+
+    await pollLinear({ db, linear, config: TEST_CONFIG }, now + 60_000);
+    expect(linear.sinceCalls).toEqual([null, '2026-10-10T12:00:00.000Z']);
+  });
+
   it('passes the cursor on and does not double-count an issue re-delivered at the cursor time', async () => {
     linear.setIssuePages([issue({ status: 'Triage' })]);
     await pollLinear({ db, linear, config: TEST_CONFIG }, 10);
