@@ -98,6 +98,7 @@ The full vision has five sub-projects:
 | `creating_issue` | `create-linear-issue` succeeds | `linked` |
 | any non-terminal | user: Discard | category `dismissed` |
 | any job-driven state | job fails permanently | `failed` (`last_error` set) |
+| `duplicate_suspected`, `draft_ready` | link job fails permanently | unchanged (`last_error` set, so the user can choose again) |
 | `failed` | user: Retry | the state the failed job started from; the job is re-enqueued |
 
 The machine is a pure function: `transition(state, event) → { state, effects[] }`. Invalid transitions return an error, and actions show that error to the caller.
@@ -184,6 +185,7 @@ rules:
 ### `create-linear-issue` job
 
 1. **Idempotency check:** call `attachmentsForURL(slack_permalink)`. If the URL is already attached to an issue, record that issue and move to `linked`.
+   Approve also generates a UUID and stores it in the job payload. The handler checks `issue(id: uuid)` before creating, and passes the UUID as `IssueCreateInput.id`. Retries and re-arms reuse the same UUID, so one approval can never create two issues.
 2. Otherwise call `issueCreate` in the default team with the title and this description:
    ```
    ## Problem
@@ -203,7 +205,7 @@ Resolves the issue from its identifier when the payload has no id (the CLI path)
 
 - The worker claims one `queued` job with `run_after ≤ now` and marks it `running` in a single transaction.
 - **Transient errors** (network failures, 5xx, 429) are rescheduled with exponential backoff (30 s, 2 min, 10 min) and respect `Retry-After`. The job gets at most 3 attempts.
-- **Permanent failures** (out of attempts, invalid Claude output after the retry, 4xx other than 429) mark the job `failed`. The item moves to `triage_state = failed` with `last_error` set, and an activity entry is written.
+- **Permanent failures** (out of attempts, invalid Claude output after the retry, 4xx other than 429) mark the job `failed`. The item moves to `triage_state = failed` with `last_error` set, and an activity entry is written. Exception: a failed `link-linear-issue` job leaves the item in its user-decision state (`duplicate_suspected` or `draft_ready`) with `last_error` set.
 - **Crash recovery:** when the worker starts, any job that has been `running` for more than 15 minutes is set back to `queued`.
 - Poller errors are stored in `poll_cursors.last_error`. The cursor does not advance, so the next cycle retries the same window.
 
