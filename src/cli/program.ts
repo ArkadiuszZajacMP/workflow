@@ -1,7 +1,7 @@
 import { Command } from 'commander';
 import { approve, discard, link, move, retry, revise } from '@/core/actions';
 import type { Db } from '@/core/db/client';
-import type { Category, Item } from '@/core/db/schema';
+import { CATEGORIES, type Category, type Item } from '@/core/db/schema';
 import { ActionError, errorMessage } from '@/core/errors';
 import { getItemDetail, listItems } from '@/core/queries';
 
@@ -15,6 +15,11 @@ function parseId(value: string): number {
   const id = Number(value);
   if (!Number.isInteger(id) || id <= 0) throw new ActionError('Item id must be a positive integer');
   return id;
+}
+
+function parseCategory(value: string): Category {
+  if (!CATEGORIES.includes(value as Category)) throw new ActionError(`Unknown category "${value}"`);
+  return value as Category;
 }
 
 export function buildProgram(db: Db, io: Io): Command {
@@ -37,8 +42,9 @@ export function buildProgram(db: Db, io: Io): Command {
     .option('--category <category>', 'triage | in_progress | verification | done | dismissed')
     .option('--json', 'print JSON')
     .action(
-      run((opts: { category?: Category; json?: boolean }) => {
-        const result = listItems(db, { category: opts.category });
+      run((opts: { category?: string; json?: boolean }) => {
+        const category = opts.category === undefined ? undefined : parseCategory(opts.category);
+        const result = listItems(db, { category });
         if (opts.json) io.out(JSON.stringify(result, null, 2));
         else result.forEach(printItem);
       }),

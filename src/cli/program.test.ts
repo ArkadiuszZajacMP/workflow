@@ -44,6 +44,16 @@ describe('queue CLI', () => {
     process.exitCode = 0;
   });
 
+  it('rejects an unknown category filter instead of listing everything', async () => {
+    const db = createTestDb();
+    seedItem(db, { title: 'A' });
+    const { out, err } = await run(db, 'list', '--category', 'archived');
+    expect(out).toEqual([]);
+    expect(err.join('')).toBe('Error: Unknown category "archived"');
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+  });
+
   it('rejects non-numeric ids', async () => {
     const db = createTestDb();
     const { err } = await run(db, 'show', 'abc');
