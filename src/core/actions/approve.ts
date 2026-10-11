@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Db } from '../db/client';
 import type { Item } from '../db/schema';
 import { latestDraft } from '../drafts';
@@ -12,7 +13,7 @@ export function approve(db: Db, itemId: number, now = Date.now()): Item {
     if (!latestDraft(tx, itemId)) throw new ActionError(`Item #${itemId} has no draft to approve`);
     assertNoActiveJob(tx, itemId);
     const item = applyTriageEvent(tx, itemId, { type: 'approved' }, now);
-    enqueueJob(tx, 'create-linear-issue', itemId, {}, now);
+    enqueueJob(tx, 'create-linear-issue', itemId, { issueUuid: randomUUID() }, now);
     logActivity(tx, itemId, 'Draft approved, creating Linear issue', now);
     return item;
   });

@@ -31,6 +31,13 @@ describe('approve', () => {
     expect(allJobs()).toMatchObject([{ type: 'create-linear-issue', itemId: item.id }]);
   });
 
+  it('stores a fresh issue UUID in the create job payload', () => {
+    const item = draftReadyItem();
+    approve(db, item.id, 5);
+    const uuid = (allJobs()[0]?.payload as { issueUuid?: string }).issueUuid;
+    expect(uuid).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+
   it('requires a draft', () => {
     const item = seedItem(db, { triageState: 'draft_ready' });
     expect(() => approve(db, item.id)).toThrow(/no draft/);
@@ -103,7 +110,7 @@ describe('discard and move', () => {
 describe('retry', () => {
   it('restores the failed-from state and requeues the failed job', () => {
     const item = seedItem(db, { triageState: 'creating_issue' });
-    enqueueJob(db, 'create-linear-issue', item.id, {}, 0);
+    enqueueJob(db, 'create-linear-issue', item.id, { issueUuid: 'uuid-1' }, 0);
     const claimed = claimNextJob(db, 0)!;
     failJob(db, claimed, new PermanentError('Linear API error: team not found'), 0);
     markItemFailed(db, item.id, 'creating_issue', 'Linear API error: team not found', 0);

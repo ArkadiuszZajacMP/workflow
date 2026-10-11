@@ -102,12 +102,12 @@ describe('job bookkeeping', () => {
   });
 
   it('requeues the latest failed job with a fresh attempt budget', () => {
-    enqueueJob(db, 'create-linear-issue', itemId, {}, 0);
+    enqueueJob(db, 'create-linear-issue', itemId, { issueUuid: 'uuid-1' }, 0);
     const claimed = claimNextJob(db, 0)!;
     failJob(db, claimed, new PermanentError('boom'), 0);
     const failed = latestFailedJob(db, itemId)!;
     expect(failed.id).toBe(claimed.id);
     requeueJob(db, failed.id, 50);
-    expect(getJob(failed.id)).toMatchObject({ status: 'queued', attempts: 0, runAfter: 50, lastError: null });
+    expect(getJob(failed.id)).toMatchObject({ status: 'queued', attempts: 0, runAfter: 50, lastError: null, payload: { issueUuid: 'uuid-1' } });
   });
 });

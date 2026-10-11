@@ -17,10 +17,10 @@ export interface LinearClient {
   searchIssues(term: string, teamKey: string, first: number): Promise<LinearCandidate[]>;
   getTeamId(teamKey: string): Promise<string>;
   getIssue(idOrIdentifier: string): Promise<LinearIssueRef | null>;
-  createIssue(input: { teamId: string; title: string; description: string }): Promise<LinearIssueRef>;
+  /** `id` is a client-generated UUID v4 that Linear uses as the issue id. */
+  createIssue(input: { id: string; teamId: string; title: string; description: string }): Promise<LinearIssueRef>;
   attachUrl(issueId: string, url: string, title: string): Promise<void>;
   findIssueByAttachmentUrl(url: string): Promise<LinearIssueRef | null>;
-  findMyRecentIssue(teamKey: string, title: string, description: string, sinceIso: string): Promise<LinearIssueRef | null>;
 }
 
 export type PromptName = 'search-terms' | 'assess-duplicates' | 'draft';

@@ -52,18 +52,13 @@ describe('createLinearClient', () => {
     expect(bodyOf(fetchFn).variables).toMatchObject({ term: 'export', first: 15, filter: { team: { key: { eq: 'ENG' } } } });
   });
 
-  it('finds a recent own issue by title and exact trimmed description', async () => {
-    const nodes = [
-      { id: 'a', identifier: 'ENG-1', title: 'T', url: 'ua', description: 'other' },
-      { id: 'b', identifier: 'ENG-2', title: 'T', url: 'ub', description: 'body\n' },
-    ];
-    const fetchFn = fakeFetch({ body: { data: { issues: { nodes } } } }, { body: { data: { issues: { nodes } } } });
+  it('creates the issue with the client-supplied UUID as its id', async () => {
+    const issue = { id: 'uuid-1', identifier: 'ENG-3', title: 'T', url: 'u3' };
+    const fetchFn = fakeFetch({ body: { data: { issueCreate: { success: true, issue } } } });
     const client = createLinearClient('key', fetchFn as unknown as typeof fetch);
-    const since = '2026-10-09T00:00:00.000Z';
-    expect(await client.findMyRecentIssue('ENG', 'T', 'body', since)).toEqual({ id: 'b', identifier: 'ENG-2', title: 'T', url: 'ub' });
-    expect(bodyOf(fetchFn).variables).toEqual({ teamKey: 'ENG', title: 'T', since });
-    expect(bodyOf(fetchFn).query).toContain('creator: { isMe: { eq: true } }');
-    expect(await client.findMyRecentIssue('ENG', 'T', 'different', since)).toBeNull();
+    const input = { id: 'uuid-1', teamId: 'team', title: 'T', description: 'body' };
+    expect(await client.createIssue(input)).toEqual(issue);
+    expect(bodyOf(fetchFn).variables).toEqual({ input });
   });
 
   it('turns 429 into TransientError with Retry-After', async () => {

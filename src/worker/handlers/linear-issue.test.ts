@@ -12,6 +12,7 @@ import { linkLinearIssueHandler } from './link-linear-issue';
 import type { HandlerContext } from './types';
 
 const PERMALINK = 'https://slack.test/archives/C1/p10';
+const UUID = '6f1c1d2e-3b4a-4c5d-8e9f-0a1b2c3d4e5f';
 let db: Db;
 let linear: FakeLinear;
 let ctx: HandlerContext;
@@ -25,7 +26,7 @@ beforeEach(() => {
 function approvedItem() {
   const item = seedItem(db, { triageState: 'creating_issue', slackChannel: 'C1', slackThreadTs: '1.0', slackPermalink: PERMALINK });
   saveDraft(db, item.id, { title: 'CSV export returns 500', problem: 'Export fails.', acceptanceCriteria: ['Export works'] }, 'claude', null, 1);
-  enqueueJob(db, 'create-linear-issue', item.id, {}, 0);
+  enqueueJob(db, 'create-linear-issue', item.id, { issueUuid: UUID }, 0);
   return { item, job: claimNextJob(db, 0)! };
 }
 
@@ -35,13 +36,14 @@ describe('createLinearIssueHandler', () => {
     await createLinearIssueHandler(ctx, job);
     expect(linear.created).toEqual([
       {
+        id: UUID,
         teamId: 'team-ENG',
         title: 'CSV export returns 500',
         description: '## Problem\nExport fails.\n\n## Acceptance criteria\n- [ ] Export works\n',
       },
     ]);
-    expect(linear.attached).toEqual([{ issueId: 'issue-100', url: PERMALINK, title: 'Slack thread' }]);
-    expect(getItem(db, item.id)).toMatchObject({ triageState: 'linked', linearIdentifier: 'ENG-100' });
+    expect(linear.attached).toEqual([{ issueId: UUID, url: PERMALINK, title: 'Slack thread' }]);
+    expect(getItem(db, item.id)).toMatchObject({ triageState: 'linked', linearIssueId: UUID, linearIdentifier: 'ENG-100' });
   });
 
   it('links instead of creating when the thread is already attached to an issue', async () => {
@@ -57,14 +59,14 @@ describe('createLinearIssueHandler', () => {
     const { item, job } = approvedItem();
     linear.failures.attachUrl = new TransientError('timeout');
     await expect(createLinearIssueHandler(ctx, job)).rejects.toThrow('timeout');
-    expect(getItem(db, item.id)).toMatchObject({ triageState: 'creating_issue', linearIdentifier: 'ENG-100' });
+    expect(getItem(db, item.id)).toMatchObject({ triageState: 'creating_issue', linearIssueId: UUID, linearIdentifier: 'ENG-100' });
 
     await createLinearIssueHandler(ctx, job);
     expect(linear.created).toHaveLength(1);
     expect(getItem(db, item.id)?.triageState).toBe('linked');
   });
 
-  it('does not create a second issue when the create response was lost', async () => {
+  it('does not create a second issue when the create response was lost (finds it by the job UUID)', async () => {
     const { item, job } = approvedItem();
     linear.loseNextCreateResponse = true;
     await expect(createLinearIssueHandler(ctx, job)).rejects.toThrow('timeout');
@@ -72,8 +74,21 @@ describe('createLinearIssueHandler', () => {
 
     await createLinearIssueHandler(ctx, job);
     expect(linear.created).toHaveLength(1);
-    expect(linear.attached).toEqual([{ issueId: 'issue-100', url: PERMALINK, title: 'Slack thread' }]);
-    expect(getItem(db, item.id)).toMatchObject({ triageState: 'linked', linearIssueId: 'issue-100' });
+    expect(linear.created[0]?.id).toBe(UUID);
+    expect(linear.attached).toEqual([{ issueId: UUID, url: PERMALINK, title: 'Slack thread' }]);
+    expect(getItem(db, item.id)).toMatchObject({ triageState: 'linked', linearIssueId: UUID });
+  });
+
+  it('does not create a second issue even when the lost issue has a different title', async () => {
+    const { item, job } = approvedItem();
+    linear.loseNextCreateResponse = true;
+    await expect(createLinearIssueHandler(ctx, job)).rejects.toThrow('timeout');
+    // Someone renamed the issue in Linear before the retry ran: a title search would miss it, the UUID does not.
+    linear.addIssue({ ...linear.issues.get(UUID)!, title: 'Renamed' });
+
+    await createLinearIssueHandler(ctx, job);
+    expect(linear.created).toHaveLength(1);
+    expect(getItem(db, item.id)).toMatchObject({ triageState: 'linked', linearIssueId: UUID });
   });
 
   it('records the created issue but does not link when dismissed during the Linear calls', async () => {
@@ -85,7 +100,7 @@ describe('createLinearIssueHandler', () => {
     };
     await createLinearIssueHandler(ctx, job);
     expect(linear.created).toHaveLength(1);
-    expect(getItem(db, item.id)).toMatchObject({ triageState: 'creating_issue', linearIssueId: 'issue-100' });
+    expect(getItem(db, item.id)).toMatchObject({ triageState: 'creating_issue', linearIssueId: UUID });
   });
 
   it('does nothing for a dismissed item', async () => {

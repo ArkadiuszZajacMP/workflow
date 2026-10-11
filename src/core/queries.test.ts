@@ -21,7 +21,7 @@ describe('queries', () => {
     const db = createTestDb();
     const item = seedItem(db, { triageState: 'draft_ready' });
     saveDraft(db, item.id, { title: 'T', problem: 'P', acceptanceCriteria: ['A'] }, 'claude', null, 1);
-    enqueueJob(db, 'create-linear-issue', item.id, {}, 0);
+    enqueueJob(db, 'create-linear-issue', item.id, { issueUuid: 'uuid-1' }, 0);
     expect(getItemDetail(db, item.id)).toMatchObject({ item: { id: item.id }, drafts: [{ version: 1 }], activeJob: true });
     expect(getItemDetail(db, 999)).toBeNull();
   });

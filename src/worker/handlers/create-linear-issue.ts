@@ -1,6 +1,7 @@
 import { latestDraft, renderIssueDescription } from '@/core/drafts';
 import { PermanentError } from '@/core/errors';
 import { applyTriageEvent, claimLinearIssue, getItem, logActivity } from '@/core/items';
+import { jobPayload } from '@/core/jobs/queue';
 import type { LinearIssueRef } from '@/core/types';
 import type { Handler } from './types';
 
@@ -11,6 +12,8 @@ export const createLinearIssueHandler: Handler = async (ctx, job) => {
   const draft = latestDraft(db, item.id);
   if (!draft) throw new PermanentError(`Item #${item.id} has no draft`);
   if (!item.slackPermalink) throw new PermanentError(`Item #${item.id} has no Slack permalink`);
+  const { issueUuid } = jobPayload(job as typeof job & { type: 'create-linear-issue' });
+  if (!issueUuid) throw new PermanentError(`Job #${job.id} has no issue UUID`);
 
   // A previous attempt may have created the issue and then failed. Never create twice.
   let issue: LinearIssueRef | null =
@@ -28,9 +31,8 @@ export const createLinearIssueHandler: Handler = async (ctx, job) => {
     }
   }
   if (!issue) {
-    // A create whose response was lost (timeout) leaves an issue we never recorded. Look for it every time.
-    const since = new Date(ctx.now() - 86_400_000).toISOString();
-    issue = await linear.findMyRecentIssue(config.linear.defaultTeam, draft.title, renderIssueDescription(draft), since);
+    // A create whose response was lost (timeout) left an issue under our UUID that we never recorded.
+    issue = await linear.getIssue(issueUuid);
     if (issue) {
       claimLinearIssue(db, item.id, issue, ctx.now());
       message = `Created ${issue.identifier} in Linear`;
@@ -38,7 +40,7 @@ export const createLinearIssueHandler: Handler = async (ctx, job) => {
   }
   if (!issue) {
     const teamId = await linear.getTeamId(config.linear.defaultTeam);
-    issue = await linear.createIssue({ teamId, title: draft.title, description: renderIssueDescription(draft) });
+    issue = await linear.createIssue({ id: issueUuid, teamId, title: draft.title, description: renderIssueDescription(draft) });
     claimLinearIssue(db, item.id, issue, ctx.now());
     message = `Created ${issue.identifier} in Linear`;
   }

@@ -6,7 +6,8 @@ import { errorMessage, PermanentError, TransientError } from '../errors';
 export type JobPayloads = {
   'triage-draft': Record<string, never>;
   draft: { feedback?: string };
-  'create-linear-issue': Record<string, never>;
+  /** Client-generated Linear issue id. A retry reuses it, so a lost create response can never create a second issue. */
+  'create-linear-issue': { issueUuid: string };
   'link-linear-issue': { identifier: string; issueId?: string };
 };
 

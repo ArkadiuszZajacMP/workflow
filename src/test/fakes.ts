@@ -57,8 +57,7 @@ export class FakeLinear implements LinearClient {
   searchResults = new Map<string, LinearCandidate[]>();
   issues = new Map<string, LinearIssueRef>();
   attachmentsByUrl = new Map<string, LinearIssueRef>();
-  created: { teamId: string; title: string; description: string }[] = [];
-  createdIssues: (LinearIssueRef & { description: string })[] = [];
+  created: { id: string; teamId: string; title: string; description: string }[] = [];
   loseNextCreateResponse = false;
   attached: { issueId: string; url: string; title: string }[] = [];
   failures: Partial<Record<keyof LinearClient, Error>> = {};
@@ -110,24 +109,18 @@ export class FakeLinear implements LinearClient {
     return this.issues.get(idOrIdentifier) ?? null;
   }
 
-  async createIssue(input: { teamId: string; title: string; description: string }) {
+  async createIssue(input: { id: string; teamId: string; title: string; description: string }) {
     this.maybeFail('createIssue');
+    if (this.issues.has(input.id)) throw new PermanentError(`Linear API error: issue ${input.id} already exists`);
     this.created.push(input);
     const n = this.nextNumber++;
-    const ref = { id: `issue-${n}`, identifier: `ENG-${n}`, title: input.title, url: `https://linear.test/ENG-${n}` };
+    const ref = { id: input.id, identifier: `ENG-${n}`, title: input.title, url: `https://linear.test/ENG-${n}` };
     this.addIssue(ref);
-    this.createdIssues.push({ ...ref, description: input.description });
     if (this.loseNextCreateResponse) {
       this.loseNextCreateResponse = false;
       throw new TransientError('timeout');
     }
     return ref;
-  }
-
-  async findMyRecentIssue(_teamKey: string, title: string, description: string, _sinceIso: string) {
-    this.maybeFail('findMyRecentIssue');
-    const hit = this.createdIssues.find((i) => i.title === title && i.description.trim() === description.trim());
-    return hit ? { id: hit.id, identifier: hit.identifier, title: hit.title, url: hit.url } : null;
   }
 
   async attachUrl(issueId: string, url: string, title: string) {
