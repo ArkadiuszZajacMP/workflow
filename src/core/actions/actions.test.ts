@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Db } from '@/core/db/client';
 import { jobs } from '@/core/db/schema';
 import { latestDraft, saveDraft } from '@/core/drafts';
@@ -22,6 +22,30 @@ function draftReadyItem() {
   saveDraft(db, item.id, content, 'claude', null, 1);
   return item;
 }
+
+describe('write transactions', () => {
+  it('every action takes the write lock up front (BEGIN IMMEDIATE)', () => {
+    const spy = vi.spyOn(db, 'transaction');
+    const ready = draftReadyItem();
+    editDraft(db, ready.id, content);
+    revise(db, ready.id, 'more');
+    const dup = seedItem(db, { triageState: 'duplicate_suspected' });
+    link(db, dup.id, { identifier: 'ENG-1' });
+    const dup2 = seedItem(db, { triageState: 'duplicate_suspected' });
+    notDuplicate(db, dup2.id);
+    const ready2 = seedItem(db, { triageState: 'draft_ready' });
+    saveDraft(db, ready2.id, content, 'claude', null, 1);
+    approve(db, ready2.id);
+    move(db, ready2.id, 'in_progress');
+    discard(db, ready2.id);
+    const failed = seedItem(db, { triageState: 'failed', failedFromState: 'drafting' });
+    enqueueJob(db, 'draft', failed.id, {}, 0);
+    failJob(db, claimNextJob(db, 0)!, new PermanentError('x'), 0);
+    retry(db, failed.id);
+    expect(spy.mock.calls.length).toBeGreaterThanOrEqual(8);
+    for (const call of spy.mock.calls) expect(call[1]).toEqual({ behavior: 'immediate' });
+  });
+});
 
 describe('approve', () => {
   it('moves to creating_issue and enqueues one create job, even when clicked twice', () => {

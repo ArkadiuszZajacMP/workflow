@@ -4,9 +4,10 @@ import { ActionError } from '../errors';
 import { applyTriageEvent, logActivity, updateItem } from '../items';
 import { latestFailedJob, requeueJob } from '../jobs/queue';
 import { requireActiveItem } from './guards';
+import { writeTransaction } from '../db/tx';
 
 export function retry(db: Db, itemId: number, now = Date.now()): Item {
-  return db.transaction((tx) => {
+  return writeTransaction(db, (tx) => {
     const item = requireActiveItem(tx, itemId);
     if (item.triageState !== 'failed') throw new ActionError(`Item #${itemId} has not failed`);
     const job = latestFailedJob(tx, itemId);

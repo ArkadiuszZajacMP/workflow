@@ -4,6 +4,7 @@ import { type Activity, activity, type Category, type Item, items, type NewItem,
 import { ActionError, PermanentError } from './errors';
 import { type TriageEvent, transition } from './triage/machine';
 import type { LinearIssueRef } from './types';
+import { writeTransaction } from './db/tx';
 
 export type ItemPatch = Partial<Omit<NewItem, 'id' | 'createdAt' | 'updatedAt'>>;
 
@@ -99,7 +100,7 @@ export function upsertLinearItem(db: Db, issue: LinearIssueRef, category: Catego
  * Linear-only item for that issue, that item is merged (dismissed) into this one.
  */
 export function claimLinearIssue(db: Db, itemId: number, issue: LinearIssueRef, now = Date.now()): void {
-  db.transaction((tx) => {
+  writeTransaction(db, (tx) => {
     assertCanClaimLinearIssue(tx, itemId, issue);
     const owner = findItemByLinearIssue(tx, issue.id);
     if (owner && owner.id !== itemId) {

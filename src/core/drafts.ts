@@ -2,6 +2,7 @@ import { asc, desc, eq } from 'drizzle-orm';
 import type { Db } from './db/client';
 import { type Draft, type DuplicateCandidate, drafts, duplicateCandidates } from './db/schema';
 import type { LinearIssueRef } from './types';
+import { writeTransaction } from './db/tx';
 
 export type DraftContent = { title: string; problem: string; acceptanceCriteria: string[] };
 
@@ -37,7 +38,7 @@ export function renderIssueDescription(content: DraftContent): string {
 export type CandidateInput = { issue: LinearIssueRef; confidence: number; reasoning: string };
 
 export function replaceDuplicateCandidates(db: Db, itemId: number, candidates: CandidateInput[]): void {
-  db.transaction((tx) => {
+  writeTransaction(db, (tx) => {
     tx.delete(duplicateCandidates).where(eq(duplicateCandidates.itemId, itemId)).run();
     for (const c of candidates) {
       tx.insert(duplicateCandidates)

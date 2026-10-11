@@ -4,6 +4,7 @@ import { jobPayload } from '@/core/jobs/queue';
 import { formatDraft, formatThread } from '@/core/triage/format';
 import { draftSchema } from '@/core/triage/schemas';
 import type { Handler } from './types';
+import { writeTransaction } from '@/core/db/tx';
 
 export const draftHandler: Handler = async (ctx, job) => {
   const { db, claude } = ctx;
@@ -23,7 +24,7 @@ export const draftHandler: Handler = async (ctx, job) => {
 
   if (getItem(db, item.id)?.category === 'dismissed') return;
   const now = ctx.now();
-  db.transaction((tx) => {
+  writeTransaction(db, (tx) => {
     const draft = saveDraft(tx, item.id, output, 'claude', feedback, now);
     applyTriageEvent(tx, item.id, { type: 'draft_saved' }, now);
     logActivity(tx, item.id, `Draft v${draft.version} by Claude`, now);

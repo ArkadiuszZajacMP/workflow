@@ -5,7 +5,7 @@ import * as actions from '@/core/actions';
 import { getDb } from '@/core/db/client';
 import type { Category } from '@/core/db/schema';
 import type { DraftContent } from '@/core/drafts';
-import { ActionError } from '@/core/errors';
+import { userErrorMessage } from '@/core/errors';
 
 export type ActionResult = { error?: string };
 
@@ -13,7 +13,8 @@ async function perform(fn: () => unknown): Promise<ActionResult> {
   try {
     fn();
   } catch (err) {
-    if (err instanceof ActionError) return { error: err.message };
+    const message = userErrorMessage(err);
+    if (message !== null) return { error: message };
     throw err;
   }
   revalidatePath('/');

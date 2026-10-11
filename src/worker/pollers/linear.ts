@@ -6,6 +6,7 @@ import type { Db } from '@/core/db/client';
 import { type LinearIssueSnapshot, linearIssueSnapshots } from '@/core/db/schema';
 import { type LinearLabelEvent, type LinearStatusEvent, linearEventKey } from '@/core/events';
 import { ingestEvent } from '@/core/ingest';
+import { writeTransaction } from '@/core/db/tx';
 
 export function diffIssue(
   snapshot: LinearIssueSnapshot | undefined,
@@ -52,7 +53,7 @@ export async function pollLinear(
   do {
     const page = await linear.listMyIssuesUpdatedSince(since, after);
     for (const issue of page.issues) {
-      db.transaction((tx) => {
+      writeTransaction(db, (tx) => {
         for (const { event, key } of diffIssue(getSnapshot(tx, issue.id), issue)) {
           if (ingestEvent(tx, event, key, config.rules, now).inserted) newEvents++;
         }

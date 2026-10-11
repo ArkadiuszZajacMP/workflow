@@ -2,6 +2,7 @@ import { and, asc, desc, eq, inArray, lte } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { type Job, type JobType, jobs } from '../db/schema';
 import { errorMessage, PermanentError, TransientError } from '../errors';
+import { writeTransaction } from '../db/tx';
 
 export type JobPayloads = {
   'triage-draft': Record<string, never>;
@@ -38,7 +39,7 @@ export function jobPayload<T extends JobType>(job: Job & { type: T }): JobPayloa
 }
 
 export function claimNextJob(db: Db, now = Date.now()): Job | null {
-  return db.transaction((tx) => {
+  return writeTransaction(db, (tx) => {
     const next = tx
       .select()
       .from(jobs)

@@ -2,9 +2,10 @@ import type { Db } from '../db/client';
 import type { Item } from '../db/schema';
 import { ActionError } from '../errors';
 import { logActivity, requireItem, updateItem } from '../items';
+import { writeTransaction } from '../db/tx';
 
 export function discard(db: Db, itemId: number, now = Date.now()): Item {
-  return db.transaction((tx) => {
+  return writeTransaction(db, (tx) => {
     const item = requireItem(tx, itemId);
     if (item.category === 'dismissed') throw new ActionError(`Item #${itemId} is already dismissed`);
     const updated = updateItem(tx, itemId, { category: 'dismissed' }, now);

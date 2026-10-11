@@ -6,6 +6,7 @@ import { enqueueJob } from '@/core/jobs/queue';
 import { formatCandidates, formatThread, titleFromText } from '@/core/triage/format';
 import { assessSchema, searchTermsSchema } from '@/core/triage/schemas';
 import type { Handler } from './types';
+import { writeTransaction } from '@/core/db/tx';
 
 const DAY_MS = 86_400_000;
 
@@ -49,7 +50,7 @@ export const triageDraftHandler: Handler = async (ctx, job) => {
 
   if (getItem(db, item.id)?.category === 'dismissed') return;
   const now = ctx.now();
-  db.transaction((tx) => {
+  writeTransaction(db, (tx) => {
     replaceDuplicateCandidates(
       tx,
       item.id,

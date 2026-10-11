@@ -28,3 +28,16 @@ export class ActionError extends Error {
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
+
+/** SQLite gave up waiting for the write lock (busy_timeout ran out). Trying again later usually works. */
+export function isDatabaseBusy(err: unknown): boolean {
+  const code = (err as { code?: unknown })?.code;
+  return typeof code === 'string' && code.startsWith('SQLITE_BUSY');
+}
+
+/** The message to show a user for an expected failure, or null for a bug that should propagate. */
+export function userErrorMessage(err: unknown): string | null {
+  if (err instanceof ActionError) return err.message;
+  if (isDatabaseBusy(err)) return 'Database busy, try again';
+  return null;
+}

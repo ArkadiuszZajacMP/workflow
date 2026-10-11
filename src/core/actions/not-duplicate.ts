@@ -3,9 +3,10 @@ import type { Item } from '../db/schema';
 import { applyTriageEvent, logActivity } from '../items';
 import { enqueueJob } from '../jobs/queue';
 import { assertNoActiveJob, requireActiveItem } from './guards';
+import { writeTransaction } from '../db/tx';
 
 export function notDuplicate(db: Db, itemId: number, now = Date.now()): Item {
-  return db.transaction((tx) => {
+  return writeTransaction(db, (tx) => {
     requireActiveItem(tx, itemId);
     assertNoActiveJob(tx, itemId);
     const item = applyTriageEvent(tx, itemId, { type: 'not_duplicate' }, now);

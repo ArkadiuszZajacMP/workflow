@@ -2,6 +2,7 @@ import { PermanentError } from '@/core/errors';
 import { applyTriageEvent, assertCanClaimLinearIssue, claimLinearIssue, getItem, logActivity } from '@/core/items';
 import { jobPayload } from '@/core/jobs/queue';
 import type { Handler } from './types';
+import { writeTransaction } from '@/core/db/tx';
 
 export const linkLinearIssueHandler: Handler = async (ctx, job) => {
   const { db, linear } = ctx;
@@ -18,7 +19,7 @@ export const linkLinearIssueHandler: Handler = async (ctx, job) => {
 
   if (getItem(db, item.id)?.category === 'dismissed') return;
   const now = ctx.now();
-  db.transaction((tx) => {
+  writeTransaction(db, (tx) => {
     claimLinearIssue(tx, item.id, issue, now);
     applyTriageEvent(tx, item.id, { type: 'issue_linked' }, now);
     logActivity(tx, item.id, `Linked to ${issue.identifier}`, now);

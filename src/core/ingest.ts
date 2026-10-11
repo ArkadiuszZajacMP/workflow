@@ -15,6 +15,7 @@ import {
 import { enqueueJob } from './jobs/queue';
 import { rearmStrandedJob } from './jobs/rearm';
 import { matchRule, type RuleMatch } from './rules/match';
+import { writeTransaction } from './db/tx';
 
 export type IngestResult = { inserted: boolean; item: Item | null };
 
@@ -30,7 +31,7 @@ export function ingestEvent(
   rules: Rule[] | null,
   now = Date.now(),
 ): IngestResult {
-  return db.transaction((tx) => {
+  return writeTransaction(db, (tx) => {
     const row = tx
       .insert(sourceEvents)
       .values({ source: event.source, kind: event.kind, externalKey, payload: event, seenAt: now })

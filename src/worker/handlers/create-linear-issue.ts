@@ -4,6 +4,7 @@ import { applyTriageEvent, claimLinearIssue, getItem, logActivity } from '@/core
 import { jobPayload } from '@/core/jobs/queue';
 import type { LinearIssueRef } from '@/core/types';
 import type { Handler } from './types';
+import { writeTransaction } from '@/core/db/tx';
 
 export const createLinearIssueHandler: Handler = async (ctx, job) => {
   const { db, linear, config } = ctx;
@@ -52,7 +53,7 @@ export const createLinearIssueHandler: Handler = async (ctx, job) => {
   if (getItem(db, item.id)?.category === 'dismissed') return;
   const now = ctx.now();
   const linked = issue;
-  db.transaction((tx) => {
+  writeTransaction(db, (tx) => {
     claimLinearIssue(tx, item.id, linked, now);
     applyTriageEvent(tx, item.id, { type: 'issue_linked' }, now);
     logActivity(tx, item.id, message, now);

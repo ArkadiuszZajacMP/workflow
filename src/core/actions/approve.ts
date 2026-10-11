@@ -6,9 +6,10 @@ import { ActionError } from '../errors';
 import { applyTriageEvent, logActivity } from '../items';
 import { enqueueJob } from '../jobs/queue';
 import { assertNoActiveJob, requireActiveItem } from './guards';
+import { writeTransaction } from '../db/tx';
 
 export function approve(db: Db, itemId: number, now = Date.now()): Item {
-  return db.transaction((tx) => {
+  return writeTransaction(db, (tx) => {
     requireActiveItem(tx, itemId);
     if (!latestDraft(tx, itemId)) throw new ActionError(`Item #${itemId} has no draft to approve`);
     assertNoActiveJob(tx, itemId);

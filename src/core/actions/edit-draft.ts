@@ -4,6 +4,7 @@ import { type DraftContent, saveDraft } from '../drafts';
 import { ActionError } from '../errors';
 import { applyTriageEvent, logActivity } from '../items';
 import { requireActiveItem } from './guards';
+import { writeTransaction } from '../db/tx';
 
 export function editDraft(db: Db, itemId: number, content: DraftContent, now = Date.now()): Draft {
   const clean: DraftContent = {
@@ -14,7 +15,7 @@ export function editDraft(db: Db, itemId: number, content: DraftContent, now = D
   if (!clean.title) throw new ActionError('Draft title cannot be empty');
   if (!clean.problem) throw new ActionError('Draft problem cannot be empty');
   if (clean.acceptanceCriteria.length === 0) throw new ActionError('Draft needs at least one acceptance criterion');
-  return db.transaction((tx) => {
+  return writeTransaction(db, (tx) => {
     requireActiveItem(tx, itemId);
     applyTriageEvent(tx, itemId, { type: 'user_edited' }, now);
     const draft = saveDraft(tx, itemId, clean, 'user', null, now);
