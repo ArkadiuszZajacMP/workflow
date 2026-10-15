@@ -1,5 +1,5 @@
 linear:
-  defaultTeam: ENG
+  defaultTeam: BOO
 slack:
   pollIntervalSeconds: 60
   backfillOnFirstRun: false
