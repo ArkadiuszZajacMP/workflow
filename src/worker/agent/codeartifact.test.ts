@@ -38,6 +38,20 @@ describe('CodeArtifactTokens', () => {
     await expect(tokens.token('core-artifactory', TEST_REPO_MAP.defaults)).resolves.toBe('tok-2');
   });
 
+  it('fails permanently when the AWS output is not JSON', async () => {
+    const run = async () => ok('not json at all');
+    const err = await new CodeArtifactTokens(run).token('core-artifactory', TEST_REPO_MAP.defaults).catch((e) => e);
+    expect(err).toBeInstanceOf(PermanentError);
+    expect(err.message).toContain('AWS CodeArtifact returned unexpected output');
+  });
+
+  it('fails permanently when the token has characters outside the expected set', async () => {
+    const run = async () => ok(JSON.stringify({ authorizationToken: 'bad"token', expiration: '2026-10-15T22:00:00Z' }));
+    const err = await new CodeArtifactTokens(run).token('core-artifactory', TEST_REPO_MAP.defaults).catch((e) => e);
+    expect(err).toBeInstanceOf(PermanentError);
+    expect(err.message).toContain('AWS CodeArtifact returned unexpected output');
+  });
+
   it('fails permanently with an aws sso login hint', async () => {
     const run = async () => ({ exitCode: 255, stdout: '', stderr: 'Error when retrieving token from sso: Token has expired', timedOut: false, aborted: false });
     const err = await new CodeArtifactTokens(run).token('core-artifactory', TEST_REPO_MAP.defaults).catch((e) => e);
@@ -66,6 +80,17 @@ describe('withRegistryAuth', () => {
     expect(seen).toContain('npmAlwaysAuth: true');
     expect(existsSync(path.join(home, '.npmrc'))).toBe(false);
     expect(existsSync(path.join(home, '.yarnrc.yml'))).toBe(false);
+  });
+
+  it('treats a registry containing a single quote as data, not shell code', async () => {
+    const home = mkdtempSync(path.join(tmpdir(), 'ca-home-'));
+    const registry = "https://h.example.com/npm/a'$(touch$IFS.INJECTED)'b/";
+    const out = path.join(home, 'seen.txt');
+    const args = withRegistryAuth(['sh', '-c', `cat "$HOME/.npmrc" > ${out}`], registry);
+    const result = await runProcess(args[0]!, args.slice(1), { cwd: home, env: { HOME: home, CODEARTIFACT_AUTH_TOKEN: 't' } });
+    expect(result.exitCode).toBe(0);
+    expect(existsSync(path.join(home, '.INJECTED'))).toBe(false);
+    expect(readFileSync(out, 'utf8')).toContain(`//h.example.com/npm/a'$(touch$IFS.INJECTED)'b/:_authToken=t`);
   });
 
   it('propagates the command exit code', async () => {
