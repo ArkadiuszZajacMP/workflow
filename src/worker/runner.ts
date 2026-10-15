@@ -1,11 +1,12 @@
-import type { LinearClient, SlackClient } from '@/core/clients/types';
+import type { GitHubClient, LinearClient, SlackClient } from '@/core/clients/types';
 import type { ConfigStore } from '@/core/config/load';
 import type { Config } from '@/core/config/schema';
-import { type PollSource, recordPollError, recordPollSuccess } from '@/core/cursors';
+import { getCursor, type PollSource, recordPollError, recordPollSuccess } from '@/core/cursors';
 import type { Db } from '@/core/db/client';
 import { CORE_JOB_TYPES, type JobType } from '@/core/db/schema';
 import { errorMessage, PermanentError } from '@/core/errors';
 import { claimNextJob } from '@/core/jobs/queue';
+import { enqueueWorkspaceGc } from '@/core/work/gc';
 import { executeJob } from './execute';
 import { createLinearIssueHandler } from './handlers/create-linear-issue';
 import { draftHandler } from './handlers/draft';
@@ -13,8 +14,12 @@ import { linkLinearIssueHandler } from './handlers/link-linear-issue';
 import { postPlanHandler } from './handlers/post-plan';
 import { triageDraftHandler } from './handlers/triage-draft';
 import type { Handler, HandlerContext } from './handlers/types';
+import { pollGithub } from './pollers/github';
 import { pollLinear } from './pollers/linear';
 import { pollSlack } from './pollers/slack';
+
+export const AGENT_NOT_CONFIGURED =
+  'agent workers not configured — add GITHUB_TOKEN, GH_TOKEN and CLAUDE_CODE_OAUTH_TOKEN references to .env.op';
 
 export const HANDLERS: Partial<Record<JobType, Handler>> = {
   'triage-draft': triageDraftHandler,
@@ -38,7 +43,7 @@ export async function runNextJob(ctx: HandlerContext, handlers: Partial<Record<J
 }
 
 export async function pollOnce(
-  deps: { db: Db; slack: SlackClient; linear: LinearClient; configStore: Pick<ConfigStore, 'reload'> },
+  deps: { db: Db; slack: SlackClient; linear: LinearClient; configStore: Pick<ConfigStore, 'reload'>; github?: GitHubClient | null },
   now = Date.now(),
 ): Promise<Config | null> {
   const { db, slack, linear } = deps;
@@ -58,6 +63,24 @@ export async function pollOnce(
       recordPollError(db, source, errorMessage(err), now);
       console.error(`[worker] ${source} poll failed: ${errorMessage(err)}`);
     }
+  }
+  if (deps.github) {
+    const last = getCursor(db, 'github')?.lastSuccessAt ?? 0;
+    if (now - last >= config.agent.prPollSeconds * 1000) {
+      try {
+        await pollGithub({ db, github: deps.github }, now);
+      } catch (err) {
+        recordPollError(db, 'github', errorMessage(err), now);
+        console.error(`[worker] github poll failed: ${errorMessage(err)}`);
+      }
+    }
+  } else if (deps.github === null) {
+    recordPollError(db, 'github', AGENT_NOT_CONFIGURED, now);
+  }
+  try {
+    enqueueWorkspaceGc(db, config.agent.workspaceRetentionDays, now);
+  } catch (err) {
+    console.error(`[worker] workspace GC failed: ${errorMessage(err)}`);
   }
   return config;
 }

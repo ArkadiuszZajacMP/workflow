@@ -9,7 +9,7 @@ import { approve, link } from '@/core/actions';
 import { saveDraft } from '@/core/drafts';
 import { enqueueJob } from '@/core/jobs/queue';
 import { createTestDb } from '@/test/db';
-import { FakeClaude, FakeLinear, FakeSlack, TEST_CONFIG } from '@/test/fakes';
+import { FakeClaude, FakeGitHub, FakeLinear, FakeSlack, TEST_CONFIG } from '@/test/fakes';
 import { seedItem } from '@/test/seed';
 import type { Handler, HandlerContext } from './handlers/types';
 import { HANDLERS, pollOnce, runNextJob } from './runner';
@@ -115,5 +115,28 @@ describe('core lane', () => {
     await expect(runNextJob(ctx, withDraftHandler(async () => {}))).resolves.toBe(true);
     await expect(runNextJob(ctx, withDraftHandler(async () => {}))).resolves.toBe(false);
     expect(db.select().from(jobs).where(eq(jobs.id, agentJob.id)).get()?.status).toBe('queued');
+  });
+});
+
+describe('pollOnce with GitHub', () => {
+  it('records that agent workers are not configured when there is no GitHub client', async () => {
+    const slack = new FakeSlack();
+    slack.setPages([]);
+    const configStore = { reload: () => ({ config: TEST_CONFIG, error: null }) };
+    await pollOnce({ db, slack, linear: new FakeLinear(), configStore, github: null }, 10);
+    expect(getCursor(db, 'github')?.lastError).toMatch(/agent workers not configured/);
+  });
+
+  it('polls GitHub only when prPollSeconds have passed', async () => {
+    const slack = new FakeSlack();
+    slack.setPages([]);
+    const github = new FakeGitHub();
+    const configStore = { reload: () => ({ config: TEST_CONFIG, error: null }) };
+    await pollOnce({ db, slack, linear: new FakeLinear(), configStore, github }, 1_000_000);
+    expect(getCursor(db, 'github')?.lastSuccessAt).toBe(1_000_000);
+    await pollOnce({ db, slack, linear: new FakeLinear(), configStore, github }, 1_000_000 + 60_000);
+    expect(getCursor(db, 'github')?.lastSuccessAt).toBe(1_000_000);
+    await pollOnce({ db, slack, linear: new FakeLinear(), configStore, github }, 1_000_000 + 120_000);
+    expect(getCursor(db, 'github')?.lastSuccessAt).toBe(1_120_000);
   });
 });

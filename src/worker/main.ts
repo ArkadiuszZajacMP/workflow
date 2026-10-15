@@ -1,10 +1,20 @@
+import path from 'node:path';
 import { createClaudeClient, sdkComplete } from '@/core/clients/claude';
+import { createGitHubClient } from '@/core/clients/github';
 import { createLinearClient } from '@/core/clients/linear';
 import { createSlackClient } from '@/core/clients/slack';
 import { ConfigStore, configPath } from '@/core/config/load';
 import type { Config } from '@/core/config/schema';
 import { defaultDbPath, openDb } from '@/core/db/client';
 import { recoverRunningJobs } from '@/core/jobs/queue';
+import { expandHome } from '@/core/paths';
+import { loadRepoMap, type RepoMap } from '@/core/repos/map';
+import { CodeArtifactTokens } from './agent/codeartifact';
+import type { AgentDeps } from './agent/deps';
+import { PodmanEngine } from './agent/engine';
+import { createHostTools } from './agent/host';
+import { AgentLane } from './agent/lane';
+import { runProcess } from './agent/process';
 import { pollOnce, runNextJob } from './runner';
 
 const IDLE_MS = 2_000;
@@ -12,7 +22,9 @@ const IDLE_MS = 2_000;
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
-    console.error(`[worker] Missing ${name}. Start the worker with npm run dev or npm run start:worker (they load secrets from 1Password via scripts/with-secrets.sh) and check the references in .env.op.`);
+    console.error(
+      `[worker] Missing ${name}. Start the worker with npm run dev or npm run start:worker (they load secrets from 1Password via scripts/with-secrets.sh) and check the references in .env.op.`,
+    );
     process.exit(1);
   }
   return value;
@@ -32,6 +44,45 @@ async function main(): Promise<void> {
   let config: Config | null = null;
   const claude = createClaudeClient({ complete: sdkComplete(() => config?.claude.model ?? null) });
 
+  const githubToken = process.env.GITHUB_TOKEN;
+  const ghToken = process.env.GH_TOKEN;
+  const claudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  const agentEnabled = Boolean(githubToken && ghToken && claudeToken);
+  const github = agentEnabled ? createGitHubClient(githubToken!) : null;
+  if (!agentEnabled) console.log('[worker] Agent workers disabled: GITHUB_TOKEN, GH_TOKEN or CLAUDE_CODE_OAUTH_TOKEN is missing');
+
+  const codeArtifact = new CodeArtifactTokens(runProcess);
+  let cachedMap = null as { dir: string; map: RepoMap } | null;
+  const repoMap = (): RepoMap => {
+    const dir = expandHome(config!.agent.meetingpackageSkillDir);
+    if (!cachedMap || cachedMap.dir !== dir) cachedMap = { dir, map: loadRepoMap(dir) };
+    return cachedMap.map;
+  };
+  const agentDeps = (): AgentDeps | null => {
+    if (!agentEnabled || !config || !github) return null;
+    return {
+      db,
+      config,
+      engine: new PodmanEngine(config.agent.containerEngine),
+      github,
+      linear,
+      repoMap,
+      codeArtifact,
+      host: createHostTools({
+        run: runProcess,
+        dockerSkillDir: expandHome(config.agent.dockerSkillDir),
+        meetingpackageSkillDir: expandHome(config.agent.meetingpackageSkillDir),
+      }),
+      secrets: { claudeToken: claudeToken!, ghToken: ghToken! },
+      skillDirs: { github: expandHome(config.agent.githubSkillDir), meetingpackage: expandHome(config.agent.meetingpackageSkillDir) },
+      imageContextDir: path.join(process.cwd(), 'containers', 'agent'),
+      runsDir: path.join(path.dirname(defaultDbPath()), 'runs'),
+      promptsDir: path.join(process.cwd(), 'prompts'),
+      now: () => Date.now(),
+    };
+  };
+  const lane = new AgentLane(agentDeps);
+
   let stopping = false;
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
@@ -43,18 +94,21 @@ async function main(): Promise<void> {
   console.log('[worker] started');
   while (!stopping) {
     if (Date.now() >= nextPollAt) {
-      config = (await pollOnce({ db, slack, linear, configStore })) ?? config;
+      config = (await pollOnce({ db, slack, linear, configStore, github })) ?? config;
       nextPollAt = Date.now() + (config?.slack.pollIntervalSeconds ?? 60) * 1000;
     }
     if (config) {
-      const ctx = { db, config, slack, linear, claude, now: () => Date.now() };
+      cachedMap = cachedMap && cachedMap.dir === expandHome(config.agent.meetingpackageSkillDir) ? cachedMap : null;
+      lane.fill();
+      const ctx = { db, config, slack, linear, claude, now: () => Date.now(), repoMap };
       while (!stopping && Date.now() < nextPollAt && (await runNextJob(ctx))) {
-        // keep draining due jobs until the next poll is due
+        lane.fill();
       }
     }
     await sleep(IDLE_MS);
   }
-  console.log('[worker] stopped');
+  console.log(`[worker] stopping (${lane.size} agent run(s) in flight are left to crash recovery)`);
+  process.exit(0);
 }
 
 main().catch((err) => {
