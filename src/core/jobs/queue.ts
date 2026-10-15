@@ -215,6 +215,14 @@ export function isStopRequested(db: Db, jobId: number): boolean {
   return db.select({ stop: jobs.stopRequested }).from(jobs).where(eq(jobs.id, jobId)).get()?.stop ?? false;
 }
 
+/** Puts a job interrupted by worker shutdown back in the queue and refunds the attempt its claim consumed. */
+export function requeueAfterShutdown(db: Db, job: Job, now = Date.now()): void {
+  db.update(jobs)
+    .set({ status: 'queued', attempts: Math.max(0, job.attempts - 1), runAfter: now, stopRequested: false, updatedAt: now })
+    .where(eq(jobs.id, job.id))
+    .run();
+}
+
 export function requeueJob(db: Db, jobId: number, now = Date.now()): void {
   db.update(jobs)
     .set({ status: 'queued', attempts: 0, runAfter: now, lastError: null, stopRequested: false, updatedAt: now })

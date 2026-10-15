@@ -4,7 +4,7 @@ import path from 'node:path';
 import { z } from 'zod';
 import { extractJson } from '@/core/clients/claude';
 import type { AgentRunKind, Item, Job } from '@/core/db/schema';
-import { errorMessage, PermanentError, TransientError } from '@/core/errors';
+import { errorMessage, PermanentError, ShutdownStop, TransientError } from '@/core/errors';
 import { isStopRequested } from '@/core/jobs/queue';
 import { finishRun, startRun } from '@/core/work/runs';
 import { parseStreamLine } from '@/core/work/stream';
@@ -50,6 +50,7 @@ class RunEnded extends Error {
   constructor(
     readonly outcome: 'stopped' | 'timed_out',
     message: string,
+    readonly shutdown = false,
   ) {
     super(message);
   }
@@ -93,6 +94,18 @@ export async function runAgent<T>(deps: AgentDeps, req: AgentRunRequest<T>): Pro
     deps.now(),
   );
   const controller = new AbortController();
+  let shutdownAbort = false;
+  const onShutdown = () => {
+    // A user Stop that is already pending takes precedence over the shutdown.
+    try {
+      shutdownAbort = !isStopRequested(deps.db, req.job.id);
+    } catch {
+      shutdownAbort = true;
+    }
+    controller.abort();
+  };
+  if (deps.shutdownSignal?.aborted) onShutdown();
+  else deps.shutdownSignal?.addEventListener('abort', onShutdown, { once: true });
   const stopTimer = setInterval(() => {
     try {
       if (isStopRequested(deps.db, req.job.id)) controller.abort();
@@ -117,7 +130,10 @@ export async function runAgent<T>(deps: AgentDeps, req: AgentRunRequest<T>): Pro
         for (const event of parseStreamLine(line)) if (event.type === 'result') seen.final = event;
       },
     });
-    if (result.aborted) throw new RunEnded('stopped', 'Run stopped by user');
+    if (result.aborted) {
+      if (shutdownAbort) throw new RunEnded('stopped', 'Run stopped by worker shutdown', true);
+      throw new RunEnded('stopped', 'Run stopped by user');
+    }
     if (result.timedOut) throw new RunEnded('timed_out', `Run timed out after ${timeoutMs / 60_000} min`);
     const final = seen.final;
     if (!final) {
@@ -148,11 +164,12 @@ export async function runAgent<T>(deps: AgentDeps, req: AgentRunRequest<T>): Pro
   } catch (err) {
     if (err instanceof RunEnded) {
       finishRun(deps.db, run.id, err.outcome, err.message, deps.now());
-      throw new PermanentError(err.message);
+      throw err.shutdown ? new ShutdownStop(err.message) : new PermanentError(err.message);
     }
     finishRun(deps.db, run.id, 'failed', errorMessage(err).slice(0, 500), deps.now());
     throw err;
   } finally {
     clearInterval(stopTimer);
+    deps.shutdownSignal?.removeEventListener('abort', onShutdown);
   }
 }

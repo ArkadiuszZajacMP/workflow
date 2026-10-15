@@ -1,7 +1,7 @@
 import type { AgentJobType } from '@/core/db/schema';
 import { AGENT_JOB_TYPES } from '@/core/db/schema';
 import { errorMessage, PermanentError } from '@/core/errors';
-import { claimNextJob, requestStop } from '@/core/jobs/queue';
+import { claimNextJob } from '@/core/jobs/queue';
 import { executeJob } from '../execute';
 import type { AgentDeps, AgentHandler } from './deps';
 import { fixPrHandler } from './handlers/fix-pr';
@@ -20,6 +20,7 @@ export const AGENT_HANDLERS: Record<AgentJobType, AgentHandler> = {
 export class AgentLane {
   private readonly inFlight = new Map<Promise<void>, number>();
   private closed = false;
+  private readonly shutdownController = new AbortController();
 
   constructor(
     private readonly deps: () => AgentDeps | null,
@@ -32,8 +33,9 @@ export class AgentLane {
 
   /** Claims and starts agent jobs until the lane is full. Returns how many were started. */
   fill(): number {
-    const deps = this.deps();
-    if (!deps || this.closed) return 0;
+    const base = this.deps();
+    if (!base || this.closed) return 0;
+    const deps: AgentDeps = { ...base, shutdownSignal: this.shutdownController.signal };
     let started = 0;
     while (this.inFlight.size < deps.config.agent.maxConcurrent) {
       try {
@@ -67,23 +69,10 @@ export class AgentLane {
     await Promise.allSettled([...this.inFlight.keys()]);
   }
 
-  /** Asks every in-flight run to stop through the normal stop mechanism (the run aborts and kills claude in the container). */
-  stopAll(): void {
-    const deps = this.deps();
-    if (!deps) return;
-    for (const jobId of this.inFlight.values()) {
-      try {
-        requestStop(deps.db, jobId);
-      } catch (err) {
-        console.error(`[worker] could not request stop for job #${jobId}: ${errorMessage(err)}`);
-      }
-    }
-  }
-
-  /** Stops claiming, asks in-flight runs to stop and waits up to `timeoutMs` for them to finish. */
+  /** Stops claiming, aborts in-flight runs (their jobs are requeued) and waits up to `timeoutMs` for them to finish. */
   async shutdown(timeoutMs: number): Promise<{ timedOut: boolean }> {
     this.closed = true;
-    this.stopAll();
+    this.shutdownController.abort();
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<'timeout'>((resolve) => {
       timer = setTimeout(() => resolve('timeout'), timeoutMs);

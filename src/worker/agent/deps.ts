@@ -22,6 +22,8 @@ export type AgentDeps = {
   runsDir: string;
   promptsDir: string;
   now: () => number;
+  /** Aborted when the worker shuts down; runs then end as 'stopped' and their job is requeued. */
+  shutdownSignal?: AbortSignal;
 };
 
 export type AgentHandler = (deps: AgentDeps, job: Job) => Promise<void>;

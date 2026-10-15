@@ -17,6 +17,14 @@ export class PermanentError extends Error {
   }
 }
 
+/** The worker is shutting down and aborted this run. The job goes back to the queue without consuming an attempt. */
+export class ShutdownStop extends Error {
+  constructor(message = 'Run stopped by worker shutdown') {
+    super(message);
+    this.name = 'ShutdownStop';
+  }
+}
+
 /** A user action that is not allowed in the item's current state. Shown to the user as-is. */
 export class ActionError extends Error {
   constructor(message: string) {

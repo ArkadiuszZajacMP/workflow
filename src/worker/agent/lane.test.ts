@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { eq } from 'drizzle-orm';
 import { configSchema } from '@/core/config/schema';
 import { jobs } from '@/core/db/schema';
-import { PermanentError } from '@/core/errors';
-import { enqueueJob, isStopRequested } from '@/core/jobs/queue';
+import { PermanentError, ShutdownStop } from '@/core/errors';
+import { enqueueJob } from '@/core/jobs/queue';
 import { makeAgentDeps } from '@/test/agent';
 import { createTestDb } from '@/test/db';
 import { seedItem } from '@/test/seed';
@@ -80,19 +80,21 @@ describe('AgentLane', () => {
     expect(lane.size).toBe(0);
   });
 
-  it('shutdown stops claiming, requests stop for in-flight jobs and waits for them', async () => {
+  it('shutdown stops claiming and requeues interrupted jobs without consuming an attempt', async () => {
     const db = createTestDb();
     const { deps } = makeAgentDeps(db);
     const first = enqueueJob(db, 'investigate', seedItem(db).id, {}, 0);
     const second = enqueueJob(db, 'investigate', seedItem(db).id, {}, 0);
-    const handler: AgentHandler = async (d, job) => {
-      while (!isStopRequested(d.db, job.id)) await new Promise((r) => setTimeout(r, 5));
-    };
+    const handler: AgentHandler = (d) =>
+      new Promise((_resolve, reject) => {
+        d.shutdownSignal!.addEventListener('abort', () => reject(new ShutdownStop()));
+      });
     const lane = new AgentLane(() => deps, { investigate: handler, 'implement-pr': handler, 'fix-pr': handler, 'remove-workspace': handler });
     lane.fill();
+    expect(db.select().from(jobs).where(eq(jobs.id, first.id)).get()?.attempts).toBe(1);
     await expect(lane.shutdown(2000)).resolves.toEqual({ timedOut: false });
     expect(lane.size).toBe(0);
-    expect(db.select().from(jobs).where(eq(jobs.id, first.id)).get()?.status).toBe('done');
+    expect(db.select().from(jobs).where(eq(jobs.id, first.id)).get()).toMatchObject({ status: 'queued', attempts: 0, lastError: null });
     expect(lane.fill()).toBe(0);
     expect(db.select().from(jobs).where(eq(jobs.id, second.id)).get()?.status).toBe('queued');
   });

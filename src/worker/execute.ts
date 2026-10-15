@@ -1,8 +1,8 @@
 import type { Db } from '@/core/db/client';
 import type { Job } from '@/core/db/schema';
-import { errorMessage } from '@/core/errors';
+import { errorMessage, ShutdownStop } from '@/core/errors';
 import { getItem, logActivity } from '@/core/items';
-import { completeJob, failJob, recordJobFailure } from '@/core/jobs/queue';
+import { completeJob, failJob, recordJobFailure, requeueAfterShutdown } from '@/core/jobs/queue';
 
 /**
  * Runs one claimed job and records the outcome. Shared by the core lane and the agent lane.
@@ -15,6 +15,15 @@ export async function executeJob(db: Db, job: Job, run: () => Promise<void>, now
     await run();
     completeJob(db, job.id, now());
   } catch (err) {
+    if (err instanceof ShutdownStop) {
+      try {
+        requeueAfterShutdown(db, job, now());
+      } catch (requeueErr) {
+        // Crash recovery requeues it on the next start.
+        console.error(`[worker] Could not requeue job #${job.id} after shutdown: ${errorMessage(requeueErr)}`);
+      }
+      return;
+    }
     const message = errorMessage(err);
     const t = now();
     try {

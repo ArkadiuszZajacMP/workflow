@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { configSchema } from '@/core/config/schema';
 import type { Db } from '@/core/db/client';
-import { PermanentError, TransientError } from '@/core/errors';
+import { PermanentError, ShutdownStop, TransientError } from '@/core/errors';
 import { claimNextJob, enqueueJob, requestStop } from '@/core/jobs/queue';
 import { listRuns } from '@/core/work/runs';
 import { createWorkspaceRow, getWorkspace } from '@/core/work/workspaces';
@@ -136,6 +136,32 @@ describe('runAgent', () => {
     expect(err).toBeInstanceOf(PermanentError);
     expect(err.message).toBe('Run stopped by user');
     expect(listRuns(db, item.id)[0]?.outcome).toBe('stopped');
+  });
+
+  it('ends the run as stopped with a ShutdownStop when the worker shuts down', async () => {
+    const { deps, engine, item, job } = setup();
+    const shutdown = new AbortController();
+    deps.shutdownSignal = shutdown.signal;
+    engine.exec = async (req) => {
+      shutdown.abort();
+      return { exitCode: 143, stdout: '', stderr: '', timedOut: false, aborted: req.signal?.aborted ?? false };
+    };
+    const err = await runAgent(deps, { job, item, kind: 'investigate', prompt: 'P', schema, env: {} }).catch((e) => e);
+    expect(err).toBeInstanceOf(ShutdownStop);
+    expect(listRuns(db, item.id)[0]?.outcome).toBe('stopped');
+  });
+
+  it('treats a user Stop as permanent even if the worker is also shutting down', async () => {
+    const { deps, engine, item, job } = setup();
+    const shutdown = new AbortController();
+    deps.shutdownSignal = shutdown.signal;
+    engine.exec = async (req) => {
+      requestStop(db, job.id);
+      shutdown.abort();
+      return { exitCode: 143, stdout: '', stderr: '', timedOut: false, aborted: req.signal?.aborted ?? false };
+    };
+    const err = await runAgent(deps, { job, item, kind: 'investigate', prompt: 'P', schema, env: {} }).catch((e) => e);
+    expect(err).toBeInstanceOf(PermanentError);
   });
 
   it('treats container exec failures as transient and marks the workspace broken', async () => {
