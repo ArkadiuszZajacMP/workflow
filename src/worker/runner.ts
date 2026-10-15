@@ -4,7 +4,7 @@ import type { Config } from '@/core/config/schema';
 import { type PollSource, recordPollError, recordPollSuccess } from '@/core/cursors';
 import type { Db } from '@/core/db/client';
 import type { JobType } from '@/core/db/schema';
-import { errorMessage } from '@/core/errors';
+import { PermanentError, errorMessage } from '@/core/errors';
 import { getItem, logActivity } from '@/core/items';
 import { claimNextJob, completeJob, failJob, recordJobFailure } from '@/core/jobs/queue';
 import { createLinearIssueHandler } from './handlers/create-linear-issue';
@@ -15,19 +15,21 @@ import type { Handler, HandlerContext } from './handlers/types';
 import { pollLinear } from './pollers/linear';
 import { pollSlack } from './pollers/slack';
 
-export const HANDLERS: Record<JobType, Handler> = {
+export const HANDLERS: Partial<Record<JobType, Handler>> = {
   'triage-draft': triageDraftHandler,
   draft: draftHandler,
   'create-linear-issue': createLinearIssueHandler,
   'link-linear-issue': linkLinearIssueHandler,
 };
 
-export async function runNextJob(ctx: HandlerContext, handlers: Record<JobType, Handler> = HANDLERS): Promise<boolean> {
+export async function runNextJob(ctx: HandlerContext, handlers: Partial<Record<JobType, Handler>> = HANDLERS): Promise<boolean> {
   const job = claimNextJob(ctx.db, ctx.now());
   if (!job) return false;
   const startState = getItem(ctx.db, job.itemId)?.triageState ?? null;
   try {
-    await handlers[job.type](ctx, job);
+    const handler = handlers[job.type];
+    if (!handler) throw new PermanentError(`No handler for ${job.type}`);
+    await handler(ctx, job);
     completeJob(ctx.db, job.id, ctx.now());
   } catch (err) {
     const message = errorMessage(err);

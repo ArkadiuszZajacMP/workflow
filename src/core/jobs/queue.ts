@@ -11,6 +11,12 @@ export type JobPayloads = {
   /** Client-generated Linear issue id. A retry reuses it, so a lost create response can never create a second issue. */
   'create-linear-issue': { issueUuid: string };
   'link-linear-issue': { identifier: string; issueId?: string };
+  investigate: { feedback?: string };
+  /** Client-generated Linear comment id, so a retried post never creates a second comment. */
+  'post-plan': { commentUuid: string };
+  'implement-pr': { plannedPrId: number };
+  'fix-pr': { plannedPrId: number };
+  'remove-workspace': Record<string, never>;
 };
 
 export const MAX_ATTEMPTS = 3;
