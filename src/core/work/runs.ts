@@ -34,3 +34,11 @@ export function getRun(db: Db, id: number): AgentRun | undefined {
 export function listRuns(db: Db, itemId: number, limit = 10): AgentRun[] {
   return db.select().from(agentRuns).where(eq(agentRuns.itemId, itemId)).orderBy(desc(agentRuns.id)).limit(limit).all();
 }
+
+export function hasSucceededRun(db: Db, jobId: number, kind: AgentRunKind): boolean {
+  return !!db
+    .select({ id: agentRuns.id })
+    .from(agentRuns)
+    .where(and(eq(agentRuns.jobId, jobId), eq(agentRuns.kind, kind), eq(agentRuns.outcome, 'succeeded')))
+    .get();
+}
