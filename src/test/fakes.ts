@@ -1,10 +1,16 @@
 import type { z } from 'zod';
 import type {
   ClaudeClient,
+  FailingCheck,
+  GitHubClient,
   LinearCandidate,
   LinearClient,
   LinearIssueState,
+  PrRef,
+  PrStatus,
   PromptName,
+  PullRequestInfo,
+  ReviewThread,
   SlackClient,
   SlackReactionItem,
 } from '@/core/clients/types';
@@ -151,5 +157,75 @@ export class FakeClaude implements ClaudeClient {
     if (next === undefined) throw new Error(`FakeClaude: no response queued for ${name}`);
     if (next instanceof Error) throw next;
     return schema.parse(next);
+  }
+}
+
+export class FakeGitHub implements GitHubClient {
+  prs = new Map<string, PullRequestInfo>();
+  branches = new Map<string, PullRequestInfo>();
+  statuses = new Map<string, PrStatus>();
+  threads = new Map<string, ReviewThread[]>();
+  checks = new Map<string, FailingCheck[]>();
+  failures: Partial<Record<keyof GitHubClient, Error>> = {};
+  statusCalls: PrRef[][] = [];
+
+  private maybeFail(method: keyof GitHubClient): void {
+    const err = this.failures[method];
+    if (err) {
+      delete this.failures[method];
+      throw err;
+    }
+  }
+
+  /** Registers an open PR as both found-by-number and found-by-branch. */
+  addOpenPr(repo: string, number: number, branch: string): PullRequestInfo {
+    const info: PullRequestInfo = {
+      number,
+      url: `https://github.com/${repo}/pull/${number}`,
+      state: 'OPEN',
+      isDraft: true,
+      merged: false,
+      headRefName: branch,
+      headSha: `sha-${number}`,
+    };
+    this.prs.set(`${repo}#${number}`, info);
+    this.branches.set(`${repo}@${branch}`, info);
+    return info;
+  }
+
+  async viewer() {
+    this.maybeFail('viewer');
+    return { login: 'me' };
+  }
+
+  async getPullRequest(repo: string, number: number) {
+    this.maybeFail('getPullRequest');
+    return this.prs.get(`${repo}#${number}`) ?? null;
+  }
+
+  async findOpenPrForBranch(repo: string, branch: string) {
+    this.maybeFail('findOpenPrForBranch');
+    return this.branches.get(`${repo}@${branch}`) ?? null;
+  }
+
+  async prStatuses(prs: PrRef[]) {
+    this.maybeFail('prStatuses');
+    this.statusCalls.push(prs);
+    const result = new Map<string, PrStatus>();
+    for (const pr of prs) {
+      const status = this.statuses.get(`${pr.repo}#${pr.number}`);
+      if (status) result.set(`${pr.repo}#${pr.number}`, status);
+    }
+    return result;
+  }
+
+  async unresolvedThreads(repo: string, number: number) {
+    this.maybeFail('unresolvedThreads');
+    return this.threads.get(`${repo}#${number}`) ?? [];
+  }
+
+  async failingChecks(repo: string, number: number) {
+    this.maybeFail('failingChecks');
+    return this.checks.get(`${repo}#${number}`) ?? [];
   }
 }

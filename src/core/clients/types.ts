@@ -1,3 +1,4 @@
+import type { CiState } from '../db/schema';
 import type { z } from 'zod';
 import type { LinearIssueRef, ThreadMessage } from '../types';
 
@@ -26,4 +27,28 @@ export interface LinearClient {
 export type PromptName = 'search-terms' | 'assess-duplicates' | 'draft';
 export interface ClaudeClient {
   run<T>(name: PromptName, vars: Record<string, string>, schema: z.ZodType<T>): Promise<T>;
+}
+
+export type PrRef = { repo: string; number: number };
+export type PullRequestInfo = {
+  number: number;
+  url: string;
+  state: 'OPEN' | 'CLOSED' | 'MERGED';
+  isDraft: boolean;
+  merged: boolean;
+  headRefName: string;
+  headSha: string;
+};
+export type PrStatus = { isDraft: boolean; merged: boolean; state: string; unresolvedThreads: number; ciState: CiState };
+export type ReviewThread = { id: string; path: string | null; line: number | null; comments: { author: string; body: string }[] };
+export type FailingCheck = { name: string; summary: string; logTail: string };
+
+export interface GitHubClient {
+  viewer(): Promise<{ login: string }>;
+  getPullRequest(repo: string, number: number): Promise<PullRequestInfo | null>;
+  findOpenPrForBranch(repo: string, branch: string): Promise<PullRequestInfo | null>;
+  /** Keyed by `prKey(repo, number)`. PRs that GitHub does not return are missing from the map. */
+  prStatuses(prs: PrRef[]): Promise<Map<string, PrStatus>>;
+  unresolvedThreads(repo: string, number: number): Promise<ReviewThread[]>;
+  failingChecks(repo: string, number: number): Promise<FailingCheck[]>;
 }
