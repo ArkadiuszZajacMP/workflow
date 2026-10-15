@@ -106,3 +106,14 @@ describe('pollOnce', () => {
     expect(slack.listCalls).toEqual([]);
   });
 });
+
+describe('core lane', () => {
+  it('never claims agent jobs', async () => {
+    const item = seedItem(db, { triageState: 'drafting' });
+    const agentJob = enqueueJob(db, 'investigate', item.id, {}, 0);
+    enqueueJob(db, 'draft', item.id, {}, 0);
+    await expect(runNextJob(ctx, withDraftHandler(async () => {}))).resolves.toBe(true);
+    await expect(runNextJob(ctx, withDraftHandler(async () => {}))).resolves.toBe(false);
+    expect(db.select().from(jobs).where(eq(jobs.id, agentJob.id)).get()?.status).toBe('queued');
+  });
+});

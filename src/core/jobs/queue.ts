@@ -1,9 +1,12 @@
 import { and, asc, desc, eq, gte, inArray, lt, lte } from 'drizzle-orm';
 import type { Db } from '../db/client';
-import { type Job, type JobType, jobs, type TriageState } from '../db/schema';
+import { AGENT_JOB_TYPES, type Job, type JobType, jobs, type TriageState, type WorkState } from '../db/schema';
 import { errorMessage, PermanentError, TransientError } from '../errors';
 import { getItem, logActivity, markItemFailed, updateItem } from '../items';
 import { writeTransaction } from '../db/tx';
+import { updatePlannedPr } from '../work/planned-prs';
+import { markWorkFailed } from '../work/state';
+import { updateWorkspace } from '../work/workspaces';
 
 export type JobPayloads = {
   'triage-draft': Record<string, never>;
@@ -18,6 +21,8 @@ export type JobPayloads = {
   'fix-pr': { plannedPrId: number };
   'remove-workspace': Record<string, never>;
 };
+
+export type JobStartState = { triage: TriageState | null; work: WorkState | null };
 
 export const MAX_ATTEMPTS = 3;
 const BACKOFF_MS = [30_000, 120_000, 600_000];
@@ -45,12 +50,13 @@ export function jobPayload<T extends JobType>(job: Job & { type: T }): JobPayloa
   return job.payload as JobPayloads[T];
 }
 
-export function claimNextJob(db: Db, now = Date.now()): Job | null {
+export function claimNextJob(db: Db, now = Date.now(), types?: readonly JobType[]): Job | null {
   return writeTransaction(db, (tx) => {
+    const due = and(eq(jobs.status, 'queued'), lte(jobs.runAfter, now));
     const next = tx
       .select()
       .from(jobs)
-      .where(and(eq(jobs.status, 'queued'), lte(jobs.runAfter, now)))
+      .where(types ? and(due, inArray(jobs.type, [...types])) : due)
       .orderBy(asc(jobs.runAfter), asc(jobs.id))
       .limit(1)
       .get();
@@ -84,16 +90,43 @@ export function failJob(db: Db, job: Job, err: unknown, now = Date.now()): 'resc
 }
 
 /**
- * Records on the item that `job` failed for good. Linking starts from a state where the user is
- * choosing, so a failed link keeps that state (they can pick again). Other jobs fail the item.
+ * Records on the item that `job` failed for good.
+ * - Link and fix jobs start from states where the user is choosing, so they keep that state.
+ * - Work jobs fail the work state.
+ * - Triage jobs fail the triage state.
  */
-export function recordJobFailure(db: Db, job: Job, startState: TriageState | null, message: string, now = Date.now()): void {
-  if (job.type === 'link-linear-issue') {
-    const { identifier } = jobPayload(job as Job & { type: 'link-linear-issue' });
-    updateItem(db, job.itemId, { lastError: message }, now);
-    logActivity(db, job.itemId, `Link to ${identifier} failed: ${message}`, now);
-  } else {
-    markItemFailed(db, job.itemId, startState, message, now);
+export function recordJobFailure(db: Db, job: Job, start: JobStartState, message: string, now = Date.now()): void {
+  switch (job.type) {
+    case 'link-linear-issue': {
+      const { identifier } = jobPayload(job as Job & { type: 'link-linear-issue' });
+      updateItem(db, job.itemId, { lastError: message }, now);
+      logActivity(db, job.itemId, `Link to ${identifier} failed: ${message}`, now);
+      return;
+    }
+    case 'fix-pr': {
+      const { plannedPrId } = jobPayload(job as Job & { type: 'fix-pr' });
+      updatePlannedPr(db, plannedPrId, { lastError: message }, now);
+      updateItem(db, job.itemId, { lastError: message }, now);
+      logActivity(db, job.itemId, `Fix round failed: ${message}`, now);
+      return;
+    }
+    case 'remove-workspace':
+      updateWorkspace(db, job.itemId, { status: 'broken' }, now);
+      updateItem(db, job.itemId, { lastError: message }, now);
+      logActivity(db, job.itemId, `Removing the workspace failed: ${message}`, now);
+      return;
+    case 'implement-pr': {
+      const { plannedPrId } = jobPayload(job as Job & { type: 'implement-pr' });
+      updatePlannedPr(db, plannedPrId, { state: 'failed', lastError: message }, now);
+      markWorkFailed(db, job.itemId, start.work, message, now);
+      return;
+    }
+    case 'investigate':
+    case 'post-plan':
+      markWorkFailed(db, job.itemId, start.work, message, now);
+      return;
+    default:
+      markItemFailed(db, job.itemId, start.triage, message, now);
   }
 }
 
@@ -113,7 +146,8 @@ export function recoverRunningJobs(db: Db, now = Date.now()): { requeued: number
       .returning()
       .all();
     for (const job of exhausted) {
-      recordJobFailure(tx, job, getItem(tx, job.itemId)?.triageState ?? null, CRASHED_MESSAGE, now);
+      const item = getItem(tx, job.itemId);
+      recordJobFailure(tx, job, { triage: item?.triageState ?? null, work: item?.workState ?? null }, CRASHED_MESSAGE, now);
     }
     const requeued = tx
       .update(jobs)
@@ -134,18 +168,35 @@ export function hasActiveJob(db: Db, itemId: number): boolean {
   return row !== undefined;
 }
 
-export function latestFailedJob(db: Db, itemId: number): Job | undefined {
+export function latestFailedJob(db: Db, itemId: number, types?: readonly JobType[]): Job | undefined {
+  const failed = and(eq(jobs.itemId, itemId), eq(jobs.status, 'failed'));
   return db
     .select()
     .from(jobs)
-    .where(and(eq(jobs.itemId, itemId), eq(jobs.status, 'failed')))
+    .where(types ? and(failed, inArray(jobs.type, [...types])) : failed)
     .orderBy(desc(jobs.updatedAt), desc(jobs.id))
     .get();
 }
 
+export function runningAgentJob(db: Db, itemId: number): Job | undefined {
+  return db
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.itemId, itemId), eq(jobs.status, 'running'), inArray(jobs.type, [...AGENT_JOB_TYPES])))
+    .get();
+}
+
+export function requestStop(db: Db, jobId: number): void {
+  db.update(jobs).set({ stopRequested: true }).where(eq(jobs.id, jobId)).run();
+}
+
+export function isStopRequested(db: Db, jobId: number): boolean {
+  return db.select({ stop: jobs.stopRequested }).from(jobs).where(eq(jobs.id, jobId)).get()?.stop ?? false;
+}
+
 export function requeueJob(db: Db, jobId: number, now = Date.now()): void {
   db.update(jobs)
-    .set({ status: 'queued', attempts: 0, runAfter: now, lastError: null, updatedAt: now })
+    .set({ status: 'queued', attempts: 0, runAfter: now, lastError: null, stopRequested: false, updatedAt: now })
     .where(eq(jobs.id, jobId))
     .run();
 }

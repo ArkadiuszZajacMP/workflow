@@ -3,10 +3,10 @@ import type { ConfigStore } from '@/core/config/load';
 import type { Config } from '@/core/config/schema';
 import { type PollSource, recordPollError, recordPollSuccess } from '@/core/cursors';
 import type { Db } from '@/core/db/client';
-import type { JobType } from '@/core/db/schema';
-import { PermanentError, errorMessage } from '@/core/errors';
-import { getItem, logActivity } from '@/core/items';
-import { claimNextJob, completeJob, failJob, recordJobFailure } from '@/core/jobs/queue';
+import { CORE_JOB_TYPES, type JobType } from '@/core/db/schema';
+import { errorMessage, PermanentError } from '@/core/errors';
+import { claimNextJob } from '@/core/jobs/queue';
+import { executeJob } from './execute';
 import { createLinearIssueHandler } from './handlers/create-linear-issue';
 import { draftHandler } from './handlers/draft';
 import { linkLinearIssueHandler } from './handlers/link-linear-issue';
@@ -23,29 +23,15 @@ export const HANDLERS: Partial<Record<JobType, Handler>> = {
 };
 
 export async function runNextJob(ctx: HandlerContext, handlers: Partial<Record<JobType, Handler>> = HANDLERS): Promise<boolean> {
-  const job = claimNextJob(ctx.db, ctx.now());
+  const job = claimNextJob(ctx.db, ctx.now(), CORE_JOB_TYPES);
   if (!job) return false;
-  const startState = getItem(ctx.db, job.itemId)?.triageState ?? null;
-  try {
-    const handler = handlers[job.type];
-    if (!handler) throw new PermanentError(`No handler for ${job.type}`);
-    await handler(ctx, job);
-    completeJob(ctx.db, job.id, ctx.now());
-  } catch (err) {
-    const message = errorMessage(err);
-    const now = ctx.now();
-    try {
-      if (failJob(ctx.db, job, err, now) === 'failed') {
-        recordJobFailure(ctx.db, job, startState, message, now);
-      } else {
-        logActivity(ctx.db, job.itemId, `Retrying ${job.type} later: ${message}`, now);
-      }
-    } catch (bookkeepingErr) {
-      // A DB error here (e.g. SQLITE_BUSY) must not crash the worker. The job stays `running`
-      // and crash recovery picks it up on the next start.
-      console.error(`[worker] Could not record the failure of job #${job.id}: ${errorMessage(bookkeepingErr)}`);
-    }
-  }
+  const handler = handlers[job.type];
+  await executeJob(
+    ctx.db,
+    job,
+    () => (handler ? handler(ctx, job) : Promise.reject(new PermanentError(`No handler for ${job.type}`))),
+    ctx.now,
+  );
   return true;
 }
 

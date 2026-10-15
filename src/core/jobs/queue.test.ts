@@ -4,6 +4,9 @@ import type { Db } from '@/core/db/client';
 import { jobs } from '@/core/db/schema';
 import { PermanentError, TransientError } from '@/core/errors';
 import { getItem } from '@/core/items';
+import { createPlannedPrs, getPlannedPr } from '@/core/work/planned-prs';
+import { savePlan } from '@/core/work/plans';
+import { TEST_REPO_MAP } from '@/test/repo-map';
 import { createTestDb } from '@/test/db';
 import { seedItem } from '@/test/seed';
 import {
@@ -13,10 +16,14 @@ import {
   enqueueJob,
   failJob,
   hasActiveJob,
+  isStopRequested,
   latestFailedJob,
   MAX_ATTEMPTS,
+  recordJobFailure,
   recoverRunningJobs,
+  requestStop,
   requeueJob,
+  runningAgentJob,
 } from './queue';
 
 let db: Db;
@@ -128,5 +135,60 @@ describe('job bookkeeping', () => {
     expect(failed.id).toBe(claimed.id);
     requeueJob(db, failed.id, 50);
     expect(getJob(failed.id)).toMatchObject({ status: 'queued', attempts: 0, runAfter: 50, lastError: null, payload: { issueUuid: 'uuid-1' } });
+  });
+});
+
+describe('typed claims and failure routing', () => {
+  it('claims only the requested job types', () => {
+    enqueueJob(db, 'investigate', itemId, {}, 0);
+    const draft = enqueueJob(db, 'draft', itemId, {}, 1);
+    expect(claimNextJob(db, 5, ['draft'])?.id).toBe(draft.id);
+    expect(claimNextJob(db, 5, ['draft'])).toBeNull();
+    expect(claimNextJob(db, 5, ['investigate'])?.type).toBe('investigate');
+  });
+
+  it('fails work for investigate jobs and keeps triage untouched', () => {
+    const item = seedItem(db, { workState: 'investigating', triageState: 'linked' });
+    const job = enqueueJob(db, 'investigate', item.id, {}, 0);
+    recordJobFailure(db, job, { triage: 'linked', work: 'investigating' }, 'boom', 1);
+    expect(getItem(db, item.id)).toMatchObject({ workState: 'failed', workFailedFromState: 'investigating', triageState: 'linked' });
+  });
+
+  it('marks the planned PR failed for implement-pr', () => {
+    const item = seedItem(db, { workState: 'implementing', linearIdentifier: 'BOO-1', linearIssueId: 'i1' });
+    const plan = savePlan(db, item.id, { body: 'b', breakdown: [{ repo: 'core', scope: 'x' }] }, 'user', null, 0);
+    const [pr] = createPlannedPrs(db, item, plan, TEST_REPO_MAP, 0);
+    const job = enqueueJob(db, 'implement-pr', item.id, { plannedPrId: pr!.id }, 0);
+    recordJobFailure(db, job, { triage: null, work: 'implementing' }, 'push rejected', 1);
+    expect(getPlannedPr(db, pr!.id)).toMatchObject({ state: 'failed', lastError: 'push rejected' });
+    expect(getItem(db, item.id)?.workState).toBe('failed');
+  });
+
+  it('keeps the work state when a fix round fails', () => {
+    const item = seedItem(db, { workState: 'prs_open', linearIdentifier: 'BOO-1', linearIssueId: 'i1' });
+    const plan = savePlan(db, item.id, { body: 'b', breakdown: [{ repo: 'core', scope: 'x' }] }, 'user', null, 0);
+    const [pr] = createPlannedPrs(db, item, plan, TEST_REPO_MAP, 0);
+    const job = enqueueJob(db, 'fix-pr', item.id, { plannedPrId: pr!.id }, 0);
+    recordJobFailure(db, job, { triage: null, work: 'prs_open' }, 'timed out', 1);
+    expect(getItem(db, item.id)).toMatchObject({ workState: 'prs_open', lastError: 'timed out' });
+    expect(getPlannedPr(db, pr!.id)?.lastError).toBe('timed out');
+  });
+
+  it('finds the latest failed job of given types', () => {
+    const job = enqueueJob(db, 'investigate', itemId, {}, 0);
+    failJob(db, claimNextJob(db, 0)!, new PermanentError('x'), 0);
+    enqueueJob(db, 'draft', itemId, {}, 1);
+    failJob(db, claimNextJob(db, 1)!, new PermanentError('y'), 2);
+    expect(latestFailedJob(db, itemId, ['investigate'])?.id).toBe(job.id);
+  });
+
+  it('flags a running agent job for stopping', () => {
+    const job = enqueueJob(db, 'implement-pr', itemId, { plannedPrId: 1 }, 0);
+    expect(runningAgentJob(db, itemId)).toBeUndefined();
+    claimNextJob(db, 0);
+    expect(runningAgentJob(db, itemId)?.id).toBe(job.id);
+    expect(isStopRequested(db, job.id)).toBe(false);
+    requestStop(db, job.id);
+    expect(isStopRequested(db, job.id)).toBe(true);
   });
 });
