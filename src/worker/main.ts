@@ -12,12 +12,14 @@ import { loadRepoMap, type RepoMap } from '@/core/repos/map';
 import { CodeArtifactTokens } from './agent/codeartifact';
 import type { AgentDeps } from './agent/deps';
 import { PodmanEngine } from './agent/engine';
+import { cleanupStaleAgentRuns } from './agent/recovery';
 import { createHostTools } from './agent/host';
 import { AgentLane } from './agent/lane';
 import { runProcess } from './agent/process';
 import { pollOnce, runNextJob } from './runner';
 
 const IDLE_MS = 2_000;
+const SHUTDOWN_GRACE_MS = 15_000;
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -34,20 +36,27 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function main(): Promise<void> {
   const db = openDb(defaultDbPath());
+  const configStore = new ConfigStore(configPath());
+  const startupEngine = new PodmanEngine(configStore.reload().config?.agent.containerEngine ?? 'podman');
+  const agentEnabled = Boolean(process.env.GITHUB_TOKEN && process.env.GH_TOKEN && process.env.CLAUDE_CODE_OAUTH_TOKEN);
+  try {
+    const cleaned = await cleanupStaleAgentRuns(db, agentEnabled ? startupEngine : null);
+    if (cleaned.stopped > 0) console.log(`[worker] Marked ${cleaned.stopped} leftover agent run(s) as stopped`);
+  } catch (err) {
+    console.error(`[worker] Startup agent cleanup failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
   const recovered = recoverRunningJobs(db);
   if (recovered.requeued > 0) console.log(`[worker] Requeued ${recovered.requeued} job(s) left running by a previous crash`);
   if (recovered.failed > 0) console.log(`[worker] Failed ${recovered.failed} crashed job(s) that were out of attempts`);
 
   const slack = createSlackClient(requireEnv('SLACK_USER_TOKEN'));
   const linear = createLinearClient(requireEnv('LINEAR_API_KEY'));
-  const configStore = new ConfigStore(configPath());
   let config: Config | null = null;
   const claude = createClaudeClient({ complete: sdkComplete(() => config?.claude.model ?? null) });
 
   const githubToken = process.env.GITHUB_TOKEN;
   const ghToken = process.env.GH_TOKEN;
   const claudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
-  const agentEnabled = Boolean(githubToken && ghToken && claudeToken);
   const github = agentEnabled ? createGitHubClient(githubToken!) : null;
   if (!agentEnabled) console.log('[worker] Agent workers disabled: GITHUB_TOKEN, GH_TOKEN or CLAUDE_CODE_OAUTH_TOKEN is missing');
 
@@ -107,7 +116,9 @@ async function main(): Promise<void> {
     }
     await sleep(IDLE_MS);
   }
-  console.log(`[worker] stopping (${lane.size} agent run(s) in flight are left to crash recovery)`);
+  console.log(`[worker] stopping (${lane.size} agent run(s) in flight, waiting up to ${SHUTDOWN_GRACE_MS / 1000}s)`);
+  const { timedOut } = await lane.shutdown(SHUTDOWN_GRACE_MS);
+  if (timedOut) console.log('[worker] Some agent runs did not stop in time; crash recovery handles them on the next start');
   process.exit(0);
 }
 

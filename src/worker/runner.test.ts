@@ -11,6 +11,9 @@ import { enqueueJob } from '@/core/jobs/queue';
 import { createTestDb } from '@/test/db';
 import { FakeClaude, FakeGitHub, FakeLinear, FakeSlack, TEST_CONFIG } from '@/test/fakes';
 import { seedItem } from '@/test/seed';
+import { createPlannedPrs, updatePlannedPr } from '@/core/work/planned-prs';
+import { savePlan } from '@/core/work/plans';
+import { TEST_REPO_MAP } from '@/test/repo-map';
 import type { Handler, HandlerContext } from './handlers/types';
 import { HANDLERS, pollOnce, runNextJob } from './runner';
 
@@ -138,5 +141,24 @@ describe('pollOnce with GitHub', () => {
     expect(getCursor(db, 'github')?.lastSuccessAt).toBe(1_000_000);
     await pollOnce({ db, slack, linear: new FakeLinear(), configStore, github }, 1_000_000 + 120_000);
     expect(getCursor(db, 'github')?.lastSuccessAt).toBe(1_120_000);
+  });
+
+  it('waits prPollSeconds after a failed GitHub poll', async () => {
+    const slack = new FakeSlack();
+    slack.setPages([]);
+    const github = new FakeGitHub();
+    const configStore = { reload: () => ({ config: TEST_CONFIG, error: null }) };
+    github.failures.prStatuses = new PermanentError('boom');
+    const seeded = seedItem(db, { linearIssueId: 'g1', linearIdentifier: 'BOO-9', workState: 'prs_open' });
+    const plan = savePlan(db, seeded.id, { body: 'b', breakdown: [{ repo: 'core', scope: 'x' }] }, 'user', null, 0);
+    const [pr] = createPlannedPrs(db, seeded, plan, TEST_REPO_MAP, 0);
+    updatePlannedPr(db, pr!.id, { state: 'open', prNumber: 3 }, 0);
+    await pollOnce({ db, slack, linear: new FakeLinear(), configStore, github }, 1_000_000);
+    expect(getCursor(db, 'github')?.lastErrorAt).toBe(1_000_000);
+    await pollOnce({ db, slack, linear: new FakeLinear(), configStore, github }, 1_060_000);
+    expect(github.statusCalls).toHaveLength(0);
+    github.statuses.set('acme/core#3', { isDraft: false, merged: false, state: 'OPEN', unresolvedThreads: 0, ciState: 'success' });
+    await pollOnce({ db, slack, linear: new FakeLinear(), configStore, github }, 1_120_000);
+    expect(github.statusCalls).toHaveLength(1);
   });
 });

@@ -65,10 +65,13 @@ export async function pollOnce(
     }
   }
   if (deps.github) {
-    const last = getCursor(db, 'github')?.lastSuccessAt ?? 0;
-    if (now - last >= config.agent.prPollSeconds * 1000) {
+    const cursor = getCursor(db, 'github');
+    // A failed attempt also counts, so retries wait prPollSeconds instead of hammering GitHub every cycle.
+    const last = Math.max(cursor?.lastSuccessAt ?? 0, cursor?.lastErrorAt ?? 0);
+    const intervalMs = config.agent.prPollSeconds * 1000;
+    if (now - last >= intervalMs) {
       try {
-        await pollGithub({ db, github: deps.github }, now);
+        await pollGithub({ db, github: deps.github, intervalMs }, now);
       } catch (err) {
         recordPollError(db, 'github', errorMessage(err), now);
         console.error(`[worker] github poll failed: ${errorMessage(err)}`);
