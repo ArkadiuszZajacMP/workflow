@@ -5,6 +5,8 @@ import * as actions from '@/core/actions';
 import { getDb } from '@/core/db/client';
 import type { Category } from '@/core/db/schema';
 import type { DraftContent } from '@/core/drafts';
+import type { PlanContent } from '@/core/work/plans';
+import { loadCurrentRepoMap } from '@/core/repos/current';
 import { userErrorMessage } from '@/core/errors';
 
 export type ActionResult = { error?: string };
@@ -44,4 +46,29 @@ export async function editDraftAction(itemId: number, content: DraftContent) {
 }
 export async function retryAction(itemId: number) {
   return perform(() => actions.retry(getDb(), itemId));
+}
+
+export async function startInvestigationAction(itemId: number) {
+  return perform(() => actions.startInvestigation(getDb(), itemId));
+}
+export async function editPlanAction(itemId: number, content: PlanContent) {
+  return perform(() => actions.editPlan(getDb(), itemId, content, loadCurrentRepoMap()));
+}
+export async function revisePlanAction(itemId: number, feedback: string) {
+  return perform(() => actions.revisePlan(getDb(), itemId, feedback));
+}
+export async function approvePlanAction(itemId: number) {
+  return perform(() => actions.approvePlan(getDb(), itemId, loadCurrentRepoMap()));
+}
+export async function retryWorkAction(itemId: number) {
+  return perform(() => actions.retryWork(getDb(), itemId));
+}
+export async function fixPrAction(itemId: number, plannedPrId: number) {
+  return perform(() => actions.fixPr(getDb(), itemId, plannedPrId));
+}
+export async function stopRunAction(itemId: number) {
+  return perform(() => actions.stopRun(getDb(), itemId));
+}
+export async function removeWorkspaceAction(itemId: number) {
+  return perform(() => actions.removeWorkspace(getDb(), itemId));
 }

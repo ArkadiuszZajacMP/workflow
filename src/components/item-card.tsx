@@ -3,9 +3,10 @@ import Link from 'next/link';
 import type { Item } from '@/core/db/schema';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { displayTitle, formatAge, TRIAGE_STATE_LABELS } from '@/lib/format';
+import type { PrRollup } from '@/core/work/planned-prs';
+import { CI_LABELS, displayTitle, formatAge, TRIAGE_STATE_LABELS, WORK_STATE_LABELS } from '@/lib/format';
 
-export function ItemCard({ item, href, now }: { item: Item; href: string; now: number }) {
+export function ItemCard({ item, href, now, rollup }: { item: Item; href: string; now: number; rollup?: PrRollup }) {
   return (
     <Link href={href} scroll={false} className="block">
       <Card className="transition-colors hover:bg-muted/50">
@@ -30,6 +31,18 @@ export function ItemCard({ item, href, now }: { item: Item; href: string; now: n
             <Badge variant={item.triageState === 'failed' ? 'destructive' : 'secondary'}>
               {TRIAGE_STATE_LABELS[item.triageState]}
             </Badge>
+          )}
+          {item.workState && (
+            <Badge variant={item.workState === 'failed' ? 'destructive' : 'outline'}>{WORK_STATE_LABELS[item.workState]}</Badge>
+          )}
+          {rollup && rollup.planned > 0 && (
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span>
+                {rollup.opened}/{rollup.planned} PRs
+              </span>
+              {rollup.ci !== 'none' && <span title={CI_LABELS[rollup.ci].label}>{CI_LABELS[rollup.ci].symbol}</span>}
+              {rollup.unresolved > 0 && <span title="Unresolved review threads">💬 {rollup.unresolved}</span>}
+            </div>
           )}
         </CardContent>
       </Card>

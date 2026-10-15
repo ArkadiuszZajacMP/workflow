@@ -1,4 +1,4 @@
-import type { Category, Item, TriageState } from '@/core/db/schema';
+import type { Category, CiState, Item, TriageState, WorkState } from '@/core/db/schema';
 
 export function formatAge(fromMs: number, nowMs: number): string {
   const seconds = Math.max(0, Math.round((nowMs - fromMs) / 1000));
@@ -35,3 +35,19 @@ export function displayTitle(item: Pick<Item, 'title' | 'linearIdentifier' | 'sl
   if (item.slackChannel) return `Slack thread in ${item.slackChannel}`;
   return 'Untitled';
 }
+
+export const WORK_STATE_LABELS: Record<WorkState, string> = {
+  investigating: 'investigating',
+  plan_ready: 'plan ready',
+  posting_plan: 'posting plan',
+  implementing: 'implementing',
+  prs_open: 'PRs open',
+  failed: 'work failed',
+};
+
+export const CI_LABELS: Record<CiState, { symbol: string; label: string }> = {
+  none: { symbol: '·', label: 'no checks' },
+  pending: { symbol: '…', label: 'CI running' },
+  success: { symbol: '✓', label: 'CI passing' },
+  failure: { symbol: '✗', label: 'CI failing' },
+};

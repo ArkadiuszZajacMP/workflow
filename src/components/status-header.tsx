@@ -2,7 +2,7 @@ import Link from 'next/link';
 import type { QueueStatus } from '@/core/queries';
 import { formatAge } from '@/lib/format';
 
-const SOURCES = ['slack', 'linear', 'config'] as const;
+const SOURCES = ['slack', 'linear', 'github', 'config'] as const;
 
 export function StatusHeader({ status, now, showDismissed }: { status: QueueStatus; now: number; showDismissed: boolean }) {
   return (

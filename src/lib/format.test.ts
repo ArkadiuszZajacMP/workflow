@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { displayTitle, formatAge } from './format';
+import { CI_LABELS, displayTitle, formatAge, WORK_STATE_LABELS } from './format';
 
 describe('formatAge', () => {
   it('uses the largest whole unit', () => {
@@ -17,5 +17,12 @@ describe('displayTitle', () => {
     expect(displayTitle({ title: '', linearIdentifier: 'ENG-1', slackChannel: null })).toBe('ENG-1');
     expect(displayTitle({ title: '', linearIdentifier: null, slackChannel: 'C1' })).toBe('Slack thread in C1');
     expect(displayTitle({ title: '', linearIdentifier: null, slackChannel: null })).toBe('Untitled');
+  });
+});
+
+describe('work labels', () => {
+  it('labels every work and CI state', () => {
+    expect(WORK_STATE_LABELS.plan_ready).toBe('plan ready');
+    expect(CI_LABELS.failure).toEqual({ symbol: '✗', label: 'CI failing' });
   });
 });

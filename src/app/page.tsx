@@ -3,7 +3,8 @@ import { Board } from '@/components/board';
 import { ItemSheet } from '@/components/item-sheet';
 import { StatusHeader } from '@/components/status-header';
 import { getDb } from '@/core/db/client';
-import { getItemDetail, getQueueStatus, listItems } from '@/core/queries';
+import { getItemDetail, getQueueStatus, listItems, prRollupsByItem } from '@/core/queries';
+import { knownRepoKeys } from '@/core/repos/current';
 import { BOARD_COLUMNS } from '@/lib/board';
 
 export const dynamic = 'force-dynamic';
@@ -31,9 +32,10 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
           columns={showDismissed ? ['dismissed'] : BOARD_COLUMNS}
           hrefFor={(id) => `${base}item=${id}`}
           now={now}
+          rollups={prRollupsByItem(db)}
         />
       </main>
-      {detail && <ItemSheet key={detail.item.id} detail={detail} closeHref={closeHref} />}
+      {detail && <ItemSheet key={detail.item.id} detail={detail} closeHref={closeHref} knownRepos={knownRepoKeys()} />}
     </div>
   );
 }
