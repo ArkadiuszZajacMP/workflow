@@ -1,14 +1,37 @@
 import { Command } from 'commander';
-import { approve, discard, link, move, retry, revise } from '@/core/actions';
+import {
+  approve,
+  approvePlan,
+  discard,
+  fixPr,
+  link,
+  move,
+  removeWorkspace,
+  retry,
+  revise,
+  revisePlan,
+  startInvestigation,
+  stopRun,
+} from '@/core/actions';
 import type { Db } from '@/core/db/client';
 import { CATEGORIES, type Category, type Item } from '@/core/db/schema';
 import { ActionError, errorMessage } from '@/core/errors';
 import { getItemDetail, listItems } from '@/core/queries';
+import { loadCurrentRepoMap } from '@/core/repos/current';
+import type { RepoMap } from '@/core/repos/map';
+import { listPlannedPrs } from '@/core/work/planned-prs';
+import { latestPlan, renderPlanComment } from '@/core/work/plans';
 
 type Io = { out: (s: string) => void; err: (s: string) => void };
 
 export function formatItemLine(item: Item): string {
-  return [`#${item.id}`, item.category, item.triageState ?? '-', item.linearIdentifier ?? '-', item.title || '(untitled)'].join('\t');
+  return [
+    `#${item.id}`,
+    item.category,
+    item.workState ?? item.triageState ?? '-',
+    item.linearIdentifier ?? '-',
+    item.title || '(untitled)',
+  ].join('\t');
 }
 
 function parseId(value: string): number {
@@ -22,7 +45,7 @@ function parseCategory(value: string): Category {
   return value as Category;
 }
 
-export function buildProgram(db: Db, io: Io): Command {
+export function buildProgram(db: Db, io: Io, repoMap: () => RepoMap = loadCurrentRepoMap): Command {
   const program = new Command('queue').description('Inspect and change the workflow queue').exitOverride();
 
   const run =
@@ -73,6 +96,37 @@ export function buildProgram(db: Db, io: Io): Command {
   program.command('retry <id>').action(run((id: string) => printItem(retry(db, parseId(id)))));
   program.command('link <id> <identifier>').action(run((id: string, identifier: string) => printItem(link(db, parseId(id), { identifier }))));
   program.command('revise <id> <feedback>').action(run((id: string, feedback: string) => printItem(revise(db, parseId(id), feedback))));
+
+  program.command('investigate <id>').action(run((id: string) => printItem(startInvestigation(db, parseId(id)))));
+  program
+    .command('plan <id>')
+    .option('--json', 'print JSON')
+    .action(
+      run((id: string, opts: { json?: boolean }) => {
+        const plan = latestPlan(db, parseId(id));
+        if (!plan) throw new ActionError(`Item #${id} has no plan`);
+        if (opts.json) return io.out(JSON.stringify(plan, null, 2));
+        io.out(`Plan v${plan.version} (${plan.author})\n\n${renderPlanComment(plan)}`);
+      }),
+    );
+  program.command('approve-plan <id>').action(run((id: string) => printItem(approvePlan(db, parseId(id), repoMap()))));
+  program
+    .command('revise-plan <id> <feedback>')
+    .action(run((id: string, feedback: string) => printItem(revisePlan(db, parseId(id), feedback))));
+  program.command('fix-pr <id> <position>').action(
+    run((id: string, position: string) => {
+      const itemId = parseId(id);
+      const pr = listPlannedPrs(db, itemId).find((p) => p.position === Number(position));
+      if (!pr) throw new ActionError(`Item #${itemId} has no PR ${position}`);
+      printItem(fixPr(db, itemId, pr.id));
+    }),
+  );
+  program.command('stop-run <id>').action(run((id: string) => printItem(stopRun(db, parseId(id)))));
+  program
+    .command('workspace')
+    .description('Manage agent workspaces')
+    .command('rm <id>')
+    .action(run((id: string) => printItem(removeWorkspace(db, parseId(id)))));
 
   return program;
 }

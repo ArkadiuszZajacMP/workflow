@@ -1,10 +1,28 @@
 import { count, desc, eq, ne } from 'drizzle-orm';
 import { listCursors } from './cursors';
 import type { Db } from './db/client';
-import { type Activity, type Category, type Draft, type DuplicateCandidate, type Item, items, jobs, type PollCursor } from './db/schema';
+import {
+  type Activity,
+  type AgentRun,
+  type Category,
+  type Draft,
+  type DuplicateCandidate,
+  type Item,
+  items,
+  jobs,
+  type Plan,
+  type PlannedPr,
+  type PollCursor,
+  plannedPrs,
+  type Workspace,
+} from './db/schema';
 import { listDrafts, listDuplicateCandidates } from './drafts';
 import { getItem, listActivity } from './items';
 import { hasActiveJob } from './jobs/queue';
+import { listPlannedPrs, type PrRollup, prRollup } from './work/planned-prs';
+import { listPlans } from './work/plans';
+import { activeRun, listRuns } from './work/runs';
+import { getWorkspace } from './work/workspaces';
 
 export function listItems(db: Db, opts: { category?: Category } = {}): Item[] {
   const where = opts.category ? eq(items.category, opts.category) : ne(items.category, 'dismissed');
@@ -17,6 +35,11 @@ export type ItemDetail = {
   candidates: DuplicateCandidate[];
   activity: Activity[];
   activeJob: boolean;
+  plans: Plan[];
+  plannedPrs: PlannedPr[];
+  workspace: Workspace | null;
+  runs: AgentRun[];
+  activeRun: AgentRun | null;
 };
 
 export function getItemDetail(db: Db, id: number): ItemDetail | null {
@@ -28,7 +51,20 @@ export function getItemDetail(db: Db, id: number): ItemDetail | null {
     candidates: listDuplicateCandidates(db, id),
     activity: listActivity(db, id),
     activeJob: hasActiveJob(db, id),
+    plans: listPlans(db, id),
+    plannedPrs: listPlannedPrs(db, id),
+    workspace: getWorkspace(db, id) ?? null,
+    runs: listRuns(db, id),
+    activeRun: activeRun(db, id) ?? null,
   };
+}
+
+export function prRollupsByItem(db: Db): Record<number, PrRollup> {
+  const byItem = new Map<number, PlannedPr[]>();
+  for (const pr of db.select().from(plannedPrs).all()) {
+    byItem.set(pr.itemId, [...(byItem.get(pr.itemId) ?? []), pr]);
+  }
+  return Object.fromEntries([...byItem].map(([itemId, prs]) => [itemId, prRollup(prs)]));
 }
 
 export type QueueStatus = { polls: PollCursor[]; queuedJobs: number; failedJobs: number };
