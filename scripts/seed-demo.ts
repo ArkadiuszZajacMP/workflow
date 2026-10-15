@@ -1,3 +1,12 @@
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { enqueueJob, claimNextJob } from '@/core/jobs/queue';
+import { createPlannedPrs, updatePlannedPr } from '@/core/work/planned-prs';
+import { savePlan } from '@/core/work/plans';
+import { startRun } from '@/core/work/runs';
+import { createWorkspaceRow, updateWorkspace } from '@/core/work/workspaces';
+import type { RepoMap } from '@/core/repos/map';
+import { eq } from 'drizzle-orm';
 import { recordPollError, recordPollSuccess } from '@/core/cursors';
 import { defaultDbPath, openDb } from '@/core/db/client';
 import { items, jobs } from '@/core/db/schema';
@@ -69,6 +78,49 @@ db.insert(jobs)
   .run();
 upsertLinearItem(db, { id: 'demo-2', identifier: 'ENG-52', title: 'Room capacity filter ignores accessibility', url: 'https://linear.app' }, 'in_progress', now);
 upsertLinearItem(db, { id: 'demo-3', identifier: 'ENG-60', title: 'Search times out on long queries', url: 'https://linear.app' }, 'done', now);
+
+const demoMap: RepoMap = {
+  defaults: { awsRegion: 'eu-west-2', awsAccountId: '0', codeArtifactDomain: 'd', codeArtifactRegistry: 'https://example.com/npm/x/' },
+  repos: [
+    { key: 'mp-core', repo: 'cocouz/mp-core', url: '', defaultBranch: 'main', type: 'node', installCommand: '', validationCommands: [], envTargets: [], aliases: [] },
+    { key: 'mp_dashboard', repo: 'cocouz/mp_dashboard', url: '', defaultBranch: 'main', type: 'node', installCommand: '', validationCommands: [], envTargets: [], aliases: [] },
+  ],
+};
+
+const planReady = upsertLinearItem(db, { id: 'demo-10', identifier: 'BOO-1430', title: 'core-api drops every JSON request body', url: 'https://linear.app' }, 'triage', now);
+db.update(items).set({ workState: 'plan_ready' }).where(eq(items.id, planReady.id)).run();
+savePlan(db, planReady.id, {
+  body: '## Findings\nThe webhook raw-body parser is registered globally and disables Nest\'s JSON parser.\n## Approach\nScope the raw parser to /webhooks routes.\n## Risks\nWebhook signature checks must keep the raw body.',
+  breakdown: [
+    { repo: 'mp-core', scope: 'Scope the raw-body parser to webhook routes and add a regression test' },
+    { repo: 'mp_dashboard', scope: 'Show a clear error when a save request fails' },
+  ],
+}, 'claude', null, now);
+
+const implementing = upsertLinearItem(db, { id: 'demo-11', identifier: 'BOO-1503', title: 'BEv2: date picker closes before rates load', url: 'https://linear.app' }, 'in_progress', now);
+db.update(items).set({ workState: 'implementing' }).where(eq(items.id, implementing.id)).run();
+const implPlan = savePlan(db, implementing.id, { body: 'Keep the picker open while rates load.', breakdown: [
+  { repo: 'mp-core', scope: 'Return rates loading state' },
+  { repo: 'mp_dashboard', scope: 'Keep the date picker open while rates load' },
+] }, 'claude', null, now);
+const [p1, p2] = createPlannedPrs(db, implementing, implPlan, demoMap, now);
+updatePlannedPr(db, p1!.id, { state: 'open', prNumber: 4821, prUrl: 'https://github.com/cocouz/mp-core/pull/4821', isDraft: true, ciState: 'failure', unresolvedThreads: 2 }, now);
+updatePlannedPr(db, p2!.id, { state: 'implementing' }, now);
+createWorkspaceRow(db, { itemId: implementing.id, container: 'wf-boo-1503', volume: 'wf-boo-1503', image: 'workflow-agent:latest' }, now);
+updateWorkspace(db, implementing.id, { status: 'ready', repos: ['mp-core', 'mp_dashboard'] }, now);
+enqueueJob(db, 'implement-pr', implementing.id, { plannedPrId: p2!.id }, now);
+const runningJob = claimNextJob(db, now, ['implement-pr'])!;
+const runsDir = path.join(path.dirname(defaultDbPath()), 'runs');
+mkdirSync(runsDir, { recursive: true });
+const logPath = path.join(runsDir, `demo-${runningJob.id}.jsonl`);
+writeFileSync(
+  logPath,
+  [
+    JSON.stringify({ type: 'system', subtype: 'init', session_id: 'demo' }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Reading DatePicker.tsx' }, { type: 'tool_use', name: 'Read', input: { file_path: '/work/mp_dashboard/src/DatePicker.tsx' } }] } }),
+  ].join('\n') + '\n',
+);
+startRun(db, { jobId: runningJob.id, itemId: implementing.id, plannedPrId: p2!.id, kind: 'implement-pr', logPath }, now);
 
 recordPollSuccess(db, 'slack', 'initialized', now - 30_000);
 recordPollSuccess(db, 'config', null, now - 30_000);
