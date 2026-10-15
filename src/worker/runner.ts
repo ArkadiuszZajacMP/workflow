@@ -10,6 +10,7 @@ import { executeJob } from './execute';
 import { createLinearIssueHandler } from './handlers/create-linear-issue';
 import { draftHandler } from './handlers/draft';
 import { linkLinearIssueHandler } from './handlers/link-linear-issue';
+import { postPlanHandler } from './handlers/post-plan';
 import { triageDraftHandler } from './handlers/triage-draft';
 import type { Handler, HandlerContext } from './handlers/types';
 import { pollLinear } from './pollers/linear';
@@ -20,6 +21,7 @@ export const HANDLERS: Partial<Record<JobType, Handler>> = {
   draft: draftHandler,
   'create-linear-issue': createLinearIssueHandler,
   'link-linear-issue': linkLinearIssueHandler,
+  'post-plan': postPlanHandler,
 };
 
 export async function runNextJob(ctx: HandlerContext, handlers: Partial<Record<JobType, Handler>> = HANDLERS): Promise<boolean> {

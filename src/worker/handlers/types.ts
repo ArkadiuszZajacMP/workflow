@@ -2,6 +2,7 @@ import type { ClaudeClient, LinearClient, SlackClient } from '@/core/clients/typ
 import type { Config } from '@/core/config/schema';
 import type { Db } from '@/core/db/client';
 import type { Job } from '@/core/db/schema';
+import type { RepoMap } from '@/core/repos/map';
 
 export type HandlerContext = {
   db: Db;
@@ -10,6 +11,8 @@ export type HandlerContext = {
   linear: LinearClient;
   claude: ClaudeClient;
   now: () => number;
+  /** Needed by post-plan to resolve breakdown repos. */
+  repoMap?: () => RepoMap;
 };
 
 export type Handler = (ctx: HandlerContext, job: Job) => Promise<void>;
