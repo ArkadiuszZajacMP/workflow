@@ -4,7 +4,7 @@ import type { Job, PlannedPr } from '@/core/db/schema';
 import { writeTransaction } from '@/core/db/tx';
 import { PermanentError } from '@/core/errors';
 import { getItem, logActivity, updateItem } from '@/core/items';
-import { enqueueJob, jobPayload } from '@/core/jobs/queue';
+import { enqueueJob, hasActiveJobFor, jobPayload } from '@/core/jobs/queue';
 import { findRepo } from '@/core/repos/map';
 import { allPrsOpen, getPlannedPr, listPlannedPrs, nextPendingPr, updatePlannedPr } from '@/core/work/planned-prs';
 import { latestPlan } from '@/core/work/plans';
@@ -33,12 +33,15 @@ function markOpen(deps: AgentDeps, pr: PlannedPr, info: PullRequestInfo): void {
 
 /** Queues the next planned PR, or finishes implementation when every planned PR is open. */
 export function afterPrOpened(deps: AgentDeps, itemId: number): void {
-  const item = getItem(deps.db, itemId);
-  if (!item || item.category === 'dismissed' || item.workState !== 'implementing') return;
   writeTransaction(deps.db, (tx) => {
+    const item = getItem(tx, itemId);
+    if (!item || item.category === 'dismissed' || item.workState !== 'implementing') return;
     const next = nextPendingPr(tx, itemId);
     if (next) {
-      enqueueJob(tx, 'implement-pr', itemId, { plannedPrId: next.id }, deps.now());
+      // A re-run of an already-succeeded job must not queue the same PR twice.
+      if (!hasActiveJobFor(tx, 'implement-pr', itemId, (p) => p.plannedPrId === next.id)) {
+        enqueueJob(tx, 'implement-pr', itemId, { plannedPrId: next.id }, deps.now());
+      }
       return;
     }
     if (!allPrsOpen(tx, itemId)) return;
@@ -109,6 +112,9 @@ export const implementPrHandler: AgentHandler = async (deps, job: Job) => {
     throw new PermanentError(
       `Claude reported PR #${output.prNumber} but GitHub shows no open PR #${output.prNumber} for branch ${pr.branch} in ${pr.githubRepo}`,
     );
+  }
+  if (!info.isDraft) {
+    logActivity(deps.db, pr.itemId, `Warning: ${pr.githubRepo}#${info.number} was opened as a ready PR, not a draft`, deps.now());
   }
   markOpen(deps, pr, info);
   afterPrOpened(deps, item.id);

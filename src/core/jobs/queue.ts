@@ -174,6 +174,21 @@ export function hasActiveJob(db: Db, itemId: number): boolean {
   return row !== undefined;
 }
 
+/** True when a queued or running job of this type for the item has a payload accepted by `match`. */
+export function hasActiveJobFor<T extends JobType>(
+  db: Db,
+  type: T,
+  itemId: number,
+  match: (payload: JobPayloads[T]) => boolean,
+): boolean {
+  return db
+    .select()
+    .from(jobs)
+    .where(and(eq(jobs.itemId, itemId), eq(jobs.type, type), inArray(jobs.status, ['queued', 'running'])))
+    .all()
+    .some((j) => match(j.payload as JobPayloads[T]));
+}
+
 export function latestFailedJob(db: Db, itemId: number, types?: readonly JobType[]): Job | undefined {
   const failed = and(eq(jobs.itemId, itemId), eq(jobs.status, 'failed'));
   return db

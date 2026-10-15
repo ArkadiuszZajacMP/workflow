@@ -4,7 +4,7 @@ import { jobs } from '@/core/db/schema';
 import { PermanentError } from '@/core/errors';
 import { getItem, updateItem } from '@/core/items';
 import { claimNextJob, enqueueJob } from '@/core/jobs/queue';
-import { createPlannedPrs, getPlannedPr, listPlannedPrs } from '@/core/work/planned-prs';
+import { createPlannedPrs, getPlannedPr, listPlannedPrs, updatePlannedPr } from '@/core/work/planned-prs';
 import { savePlan } from '@/core/work/plans';
 import { makeAgentDeps } from '@/test/agent';
 import { isClaudeExec } from '@/test/fake-engine';
@@ -103,5 +103,32 @@ describe('implementPrHandler', () => {
     expect(getPlannedPr(db, prs[0]!.id)?.state).toBe('open');
     expect(queued()).toHaveLength(0);
     expect(listPlannedPrs(db, item.id)[1]?.state).toBe('pending');
+  });
+
+  it('does not queue PR 2 again when PR 1 is already open and PR 2 already has an active job', async () => {
+    const { deps, engine, prs, job } = setup();
+    updatePlannedPr(db, prs[0]!.id, { state: 'open', prNumber: 12, prUrl: 'https://github.com/acme/core/pull/12', isDraft: true }, 0);
+    enqueueJob(db, 'implement-pr', job.itemId, { plannedPrId: prs[1]!.id }, 0);
+    await implementPrHandler(deps, job);
+    expect(engine.execs.some(isClaudeExec)).toBe(false);
+    expect(queued().filter((j) => (j.payload as { plannedPrId: number }).plannedPrId === prs[1]!.id)).toHaveLength(1);
+  });
+
+  it('does nothing for an item dismissed before the run', async () => {
+    const { deps, engine, item, job } = setup();
+    updateItem(db, item.id, { category: 'dismissed' });
+    await implementPrHandler(deps, job);
+    expect(engine.execs.some(isClaudeExec)).toBe(false);
+    expect(queued()).toHaveLength(0);
+  });
+
+  it('fails permanently and does not mark the PR open when the PR is on a different branch', async () => {
+    const s = setup();
+    const { deps, engine, prs, job } = s;
+    openPrWhenClaudeRuns(s, 'acme/core', 12, 'some-other-branch');
+    engine.replyClaude({ prNumber: 12, prUrl: 'https://github.com/acme/core/pull/12', branch: 'boo-7-add-field', summary: 'x' });
+    const err = await implementPrHandler(deps, job).catch((e) => e);
+    expect(err).toBeInstanceOf(PermanentError);
+    expect(getPlannedPr(db, prs[0]!.id)?.state).not.toBe('open');
   });
 });
