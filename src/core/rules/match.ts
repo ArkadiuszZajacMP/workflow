@@ -1,7 +1,7 @@
-import type { Rule, RuleCategory } from '../config/schema';
+import type { Rule, RuleAction, RuleCategory } from '../config/schema';
 import type { SourceEvent } from '../events';
 
-export type RuleMatch = { category: RuleCategory; action?: 'triage-draft' };
+export type RuleMatch = { category: RuleCategory; action?: RuleAction };
 
 export function matchRule(event: SourceEvent, rules: Rule[]): RuleMatch | null {
   for (const rule of rules) {

@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import type { Db } from './db/client';
 import { type PollCursor, pollCursors } from './db/schema';
 
-export type PollSource = 'slack' | 'linear' | 'config';
+export type PollSource = 'slack' | 'linear' | 'config' | 'github';
 
 export function getCursor(db: Db, source: PollSource): PollCursor | undefined {
   return db.select().from(pollCursors).where(eq(pollCursors.source, source)).get();

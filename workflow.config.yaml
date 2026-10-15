@@ -9,6 +9,13 @@ triage:
   duplicateThreshold: 0.7
   searchClosedWithinDays: 90
   maxCandidates: 15
+agent:
+  containerEngine: podman
+  maxConcurrent: 1
+  prPollSeconds: 120
+  workspaceRetentionDays: 7
+  defaultRepos: []
+  linearStatusOnImplement: null
 rules:
   - when: { source: slack, reaction: eyes }
     category: triage

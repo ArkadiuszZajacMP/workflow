@@ -15,9 +15,36 @@ describe('parseConfig', () => {
         slack: { pollIntervalSeconds: 60, backfillOnFirstRun: false },
         claude: { model: null },
         triage: { duplicateThreshold: 0.7, searchClosedWithinDays: 90, maxCandidates: 15 },
+        agent: {
+          containerEngine: 'podman',
+          image: 'workflow-agent:latest',
+          maxConcurrent: 1,
+          timeoutMinutes: { investigate: 20, implement: 60 },
+          maxTurns: { investigate: 60, implement: 200 },
+          prPollSeconds: 120,
+          workspaceRetentionDays: 7,
+          meetingpackageSkillDir: '~/.claude/skills/meetingpackage',
+          dockerSkillDir: '~/.claude/skills/docker',
+          githubSkillDir: '~/.claude/skills/github',
+          syncEnv: true,
+          envName: 'development',
+          defaultRepos: [],
+          linearStatusOnImplement: null,
+        },
         rules: [],
       },
     });
+  });
+
+  it('allows start-investigation on linear rules only', () => {
+    const ok = `${minimal}rules:\n  - when: { source: linear, label: ready-to-investigate }\n    category: triage\n    action: start-investigation\n`;
+    expect(parseConfig(ok).ok).toBe(true);
+    const bad = `${minimal}rules:\n  - when: { source: slack, reaction: eyes }\n    category: triage\n    action: start-investigation\n`;
+    expect(parseConfig(bad)).toMatchObject({ ok: false, error: expect.stringContaining('only allowed on linear rules') });
+  });
+
+  it('rejects an unknown container engine setting type', () => {
+    expect(parseConfig(`${minimal}agent:\n  maxConcurrent: 0\n`).ok).toBe(false);
   });
 
   it('parses the committed workflow.config.yaml', () => {
