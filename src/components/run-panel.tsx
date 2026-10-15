@@ -13,7 +13,10 @@ export function RunPanel({ itemId, runId, kind, canStop }: { itemId: number; run
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setInterval> | undefined;
+    let inFlight = false;
     const load = async () => {
+      if (inFlight || document.hidden) return;
+      inFlight = true;
       try {
         const res = await fetch(`/runs/${runId}`, { cache: 'no-store' });
         if (cancelled || !res.ok) return;
@@ -26,6 +29,8 @@ export function RunPanel({ itemId, runId, kind, canStop }: { itemId: number; run
         }
       } catch {
         // transient fetch failure: keep polling
+      } finally {
+        inFlight = false;
       }
     };
     void load();
@@ -45,7 +50,7 @@ export function RunPanel({ itemId, runId, kind, canStop }: { itemId: number; run
           </Button>
         )}
       </div>
-      <pre className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-xs">
+      <pre role="log" aria-live="polite" className="max-h-72 overflow-y-auto whitespace-pre-wrap rounded-md border bg-muted/40 p-3 text-xs">
         {log?.lines.length ? log.lines.join('\n') : 'Waiting for output…'}
       </pre>
       {error && <p className="text-sm text-destructive">{error}</p>}

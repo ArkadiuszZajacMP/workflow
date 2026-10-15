@@ -35,7 +35,7 @@ export default async function Page({ searchParams }: { searchParams: SearchParam
           rollups={prRollupsByItem(db)}
         />
       </main>
-      {detail && <ItemSheet key={detail.item.id} detail={detail} closeHref={closeHref} knownRepos={knownRepoKeys()} />}
+      {detail && <ItemSheet key={detail.item.id} detail={detail} closeHref={closeHref} knownRepos={knownRepoKeys()} now={now} />}
     </div>
   );
 }

@@ -14,23 +14,47 @@ export function PlanEditor({
   plans,
   editable,
   knownRepos,
-  posted,
+  canApprove,
+  linearUrl,
+  planCommentId,
 }: {
   itemId: number;
   plans: Plan[];
   editable: boolean;
   knownRepos: string[];
-  posted: boolean;
+  canApprove: boolean;
+  linearUrl: string | null;
+  planCommentId: string | null;
 }) {
   const latest = plans.at(-1);
   const [selected, setSelected] = useState<number | null>(null);
   if (!latest) return null;
+  const posted = planCommentId !== null;
   const shown = plans.find((p) => p.version === selected) ?? latest;
   const isLatest = shown.version === latest.version;
   return (
     <section className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">Implementation plan{posted && ' (posted to Linear)'}</h3>
+        <h3 className="text-sm font-semibold">
+          Implementation plan
+          {posted && (
+            <>
+              {' '}
+              {linearUrl ? (
+                <a
+                  className="font-normal text-muted-foreground underline-offset-4 hover:underline"
+                  href={planCommentId ? `${linearUrl}#comment-${planCommentId.slice(0, 8)}` : linearUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  (posted to Linear)
+                </a>
+              ) : (
+                <span className="font-normal text-muted-foreground">(posted to Linear)</span>
+              )}
+            </>
+          )}
+        </h3>
         <select
           aria-label="Plan version"
           className="rounded-md border bg-background px-2 py-1 text-sm"
@@ -44,7 +68,7 @@ export function PlanEditor({
           ))}
         </select>
       </div>
-      {isLatest && editable ? <PlanForm key={latest.id} itemId={itemId} plan={latest} knownRepos={knownRepos} /> : <PlanView plan={shown} />}
+      {isLatest && editable ? <PlanForm key={latest.id} itemId={itemId} plan={latest} knownRepos={knownRepos} canApprove={canApprove} /> : <PlanView plan={shown} />}
     </section>
   );
 }
@@ -65,12 +89,30 @@ function PlanView({ plan }: { plan: Plan }) {
   );
 }
 
-function PlanForm({ itemId, plan, knownRepos }: { itemId: number; plan: Plan; knownRepos: string[] }) {
+function planProblem(content: { body: string; breakdown: BreakdownEntry[] }): string | null {
+  if (!content.body.trim()) return 'Plan body is empty';
+  if (content.breakdown.length === 0) return 'Add at least one PR';
+  if (content.breakdown.some((r) => !r.repo.trim() || !r.scope.trim())) return 'Every PR needs a repository and a scope';
+  return null;
+}
+
+function PlanForm({
+  itemId,
+  plan,
+  knownRepos,
+  canApprove,
+}: {
+  itemId: number;
+  plan: Plan;
+  knownRepos: string[];
+  canApprove: boolean;
+}) {
   const [body, setBody] = useState(plan.body);
   const [rows, setRows] = useState<BreakdownEntry[]>(plan.breakdown);
   const [feedback, setFeedback] = useState('');
   const { pending, error, run } = useActionRunner();
   const content = { body, breakdown: rows };
+  const problem = planProblem(content);
   const dirty = body !== plan.body || JSON.stringify(rows) !== JSON.stringify(plan.breakdown);
   const repoOptions = [...new Set([...knownRepos, ...rows.map((r) => r.repo)])].filter(Boolean);
   const setRow = (index: number, patch: Partial<BreakdownEntry>) =>
@@ -93,31 +135,44 @@ function PlanForm({ itemId, plan, knownRepos }: { itemId: number; plan: Plan; kn
       <div className="space-y-2">
         <Label>PR breakdown</Label>
         {rows.map((row, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <span className="w-5 text-sm text-muted-foreground">{i + 1}.</span>
-            <select
-              aria-label={`Repository for PR ${i + 1}`}
-              className="rounded-md border bg-background px-2 py-1 text-sm"
-              value={row.repo}
-              onChange={(e) => setRow(i, { repo: e.target.value })}
-            >
-              <option value="">Choose repo</option>
-              {repoOptions.map((key) => (
-                <option key={key} value={key}>
-                  {key}
-                </option>
-              ))}
-            </select>
-            <Input aria-label={`Scope for PR ${i + 1}`} value={row.scope} onChange={(e) => setRow(i, { scope: e.target.value })} />
-            <Button variant="ghost" size="sm" aria-label={`Move PR ${i + 1} up`} onClick={() => moveRow(i, -1)}>
-              ↑
-            </Button>
-            <Button variant="ghost" size="sm" aria-label={`Move PR ${i + 1} down`} onClick={() => moveRow(i, 1)}>
-              ↓
-            </Button>
-            <Button variant="ghost" size="sm" onClick={() => setRows((current) => current.filter((_, j) => j !== i))}>
-              Remove
-            </Button>
+          <div key={i} className="flex flex-col gap-2 rounded-md border p-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="w-5 text-sm text-muted-foreground">{i + 1}.</span>
+              <select
+                aria-label={`Repository for PR ${i + 1}`}
+                className="min-w-0 flex-1 rounded-md border bg-background px-2 py-1 text-sm"
+                value={row.repo}
+                onChange={(e) => setRow(i, { repo: e.target.value })}
+              >
+                <option value="">Choose repo</option>
+                {repoOptions.map((key) => (
+                  <option key={key} value={key}>
+                    {key}
+                  </option>
+                ))}
+              </select>
+              <Button variant="ghost" size="sm" aria-label={`Move PR ${i + 1} up`} disabled={i === 0} onClick={() => moveRow(i, -1)}>
+                ↑
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`Move PR ${i + 1} down`}
+                disabled={i === rows.length - 1}
+                onClick={() => moveRow(i, 1)}
+              >
+                ↓
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                aria-label={`Remove PR ${i + 1}`}
+                onClick={() => setRows((current) => current.filter((_, j) => j !== i))}
+              >
+                Remove
+              </Button>
+            </div>
+            <Input className="w-full" aria-label={`Scope for PR ${i + 1}`} value={row.scope} onChange={(e) => setRow(i, { scope: e.target.value })} />
           </div>
         ))}
         <Button variant="outline" size="sm" onClick={() => setRows((current) => [...current, { repo: '', scope: '' }])}>
@@ -126,7 +181,8 @@ function PlanForm({ itemId, plan, knownRepos }: { itemId: number; plan: Plan; kn
       </div>
       <div className="flex flex-wrap gap-2">
         <Button
-          disabled={pending}
+          disabled={pending || !canApprove || problem !== null}
+          title={problem ?? undefined}
           onClick={() =>
             run(async () => {
               if (dirty) {

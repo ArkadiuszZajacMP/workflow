@@ -40,8 +40,14 @@ export function ItemCard({ item, href, now, rollup }: { item: Item; href: string
               <span>
                 {rollup.opened}/{rollup.planned} PRs
               </span>
-              {rollup.ci !== 'none' && <span title={CI_LABELS[rollup.ci].label}>{CI_LABELS[rollup.ci].symbol}</span>}
-              {rollup.unresolved > 0 && <span title="Unresolved review threads">💬 {rollup.unresolved}</span>}
+              {rollup.ci !== 'none' && <span title={CI_LABELS[rollup.ci].label}>
+                  <span aria-hidden>{CI_LABELS[rollup.ci].symbol}</span>
+                  <span className="sr-only">{CI_LABELS[rollup.ci].label}</span>
+                </span>}
+              {rollup.unresolved > 0 && <span title="Unresolved review threads">
+                  <span aria-hidden>💬</span> {rollup.unresolved}
+                  <span className="sr-only"> unresolved review threads</span>
+                </span>}
             </div>
           )}
         </CardContent>

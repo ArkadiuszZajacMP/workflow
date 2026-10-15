@@ -17,7 +17,17 @@ import { PrsPanel } from './prs-panel';
 import { RunPanel } from './run-panel';
 import { WorkPanel } from './work-panel';
 
-export function ItemSheet({ detail, closeHref, knownRepos }: { detail: ItemDetail; closeHref: string; knownRepos: string[] }) {
+export function ItemSheet({
+  detail,
+  closeHref,
+  knownRepos,
+  now,
+}: {
+  detail: ItemDetail;
+  closeHref: string;
+  knownRepos: string[];
+  now: number;
+}) {
   const router = useRouter();
   const { item } = detail;
   const flags = itemActionFlags(item, detail.activeJob);
@@ -57,9 +67,11 @@ export function ItemSheet({ detail, closeHref, knownRepos }: { detail: ItemDetai
             plans={detail.plans}
             editable={work.canEditPlan}
             knownRepos={knownRepos}
-            posted={item.planCommentId !== null}
+            canApprove={work.canApprove}
+            linearUrl={item.linearUrl}
+            planCommentId={item.planCommentId}
           />
-          <PrsPanel itemId={item.id} prs={detail.plannedPrs} canFix={work.canFix} />
+          <PrsPanel itemId={item.id} prs={detail.plannedPrs} runs={detail.runs} now={now} canFix={work.canFix} />
           <ThreadPreview item={item} />
           <DuplicatePanel itemId={item.id} candidates={detail.candidates} enabled={flags.canResolveDuplicate} />
           <DraftEditor itemId={item.id} drafts={detail.drafts} editable={flags.canEditDraft} />
