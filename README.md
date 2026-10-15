@@ -5,9 +5,9 @@ A personal task queue fed by Slack reactions and Linear changes, with a Claude-a
 ## Setup
 
 1. `npm install`
-2. `cp .env.example .env` and fill in `SLACK_USER_TOKEN` (a user token, `xoxp-…`) and `LINEAR_API_KEY`.
+2. Secrets are read from 1Password at start-up (`scripts/with-secrets.sh` resolves each `op://` reference with `op read`), so nothing is stored on disk. This also works with the Windows `op.exe` from WSL. Install the 1Password CLI, sign in (`op signin`, or turn on CLI integration in the desktop app), then `cp .env.op.example .env.op` and point the two references at your Slack user token (`xoxp-…`) and Linear API key. `.env.op` is gitignored and holds only `op://` references. If you have several 1Password accounts, set `OP_ACCOUNT` (for example `export OP_ACCOUNT=meetingpackage.1password.com`).
 3. Set `linear.defaultTeam` in `workflow.config.yaml`.
-4. `npm run smoke` checks the Slack, Linear and Claude credentials.
+4. `npm run smoke` checks the Slack, Linear and Claude credentials. The worker and `smoke` load secrets this way; the dashboard and the `queue` CLI need none.
 
 ## Run
 

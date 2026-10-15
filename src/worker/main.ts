@@ -12,7 +12,7 @@ const IDLE_MS = 2_000;
 function requireEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
-    console.error(`[worker] Missing ${name}. Copy .env.example to .env and fill it in.`);
+    console.error(`[worker] Missing ${name}. Start the worker with npm run dev or npm run start:worker (they load secrets from 1Password via scripts/with-secrets.sh) and check the references in .env.op.`);
     process.exit(1);
   }
   return value;
