@@ -115,3 +115,58 @@ describe('createLinearClient', () => {
     );
   });
 });
+
+describe('plan comments and issue details', () => {
+  it('reads issue details with description and comments', async () => {
+    const fetchFn = fakeFetch({
+      body: {
+        data: {
+          issue: {
+            id: 'i1',
+            identifier: 'BOO-1',
+            title: 'Bug',
+            url: 'u',
+            description: null,
+            comments: { nodes: [{ body: 'first' }, { body: 'second' }] },
+          },
+        },
+      },
+    });
+    await expect(createLinearClient('key', fetchFn as unknown as typeof fetch).getIssueDetails('BOO-1')).resolves.toEqual({
+      id: 'i1',
+      identifier: 'BOO-1',
+      title: 'Bug',
+      url: 'u',
+      description: '',
+      comments: ['first', 'second'],
+    });
+  });
+
+  it('checks for a comment by id and treats not-found as false', async () => {
+    const fetchFn = fakeFetch(
+      { body: { data: { comment: { id: 'c1' } } } },
+      { status: 400, body: { errors: [{ message: 'Entity not found: Comment' }] } },
+    );
+    const client = createLinearClient('key', fetchFn as unknown as typeof fetch);
+    await expect(client.commentExists('c1')).resolves.toBe(true);
+    await expect(client.commentExists('c2')).resolves.toBe(false);
+  });
+
+  it('creates a comment with the client-supplied id', async () => {
+    const fetchFn = fakeFetch({ body: { data: { commentCreate: { success: true } } } });
+    await createLinearClient('key', fetchFn as unknown as typeof fetch).createComment({ id: 'c1', issueId: 'i1', body: 'plan' });
+    expect(bodyOf(fetchFn).variables).toEqual({ input: { id: 'c1', issueId: 'i1', body: 'plan' } });
+  });
+
+  it('moves an issue to a workflow state by name, case-insensitively', async () => {
+    const fetchFn = fakeFetch(
+      { body: { data: { issue: { team: { states: { nodes: [{ id: 's1', name: 'Todo' }, { id: 's2', name: 'In Progress' }] } } } } } },
+      { body: { data: { issueUpdate: { success: true } } } },
+      { body: { data: { issue: { team: { states: { nodes: [{ id: 's1', name: 'Todo' }] } } } } } },
+    );
+    const client = createLinearClient('key', fetchFn as unknown as typeof fetch);
+    await client.setIssueStateByName('i1', 'in progress');
+    expect(bodyOf(fetchFn, 1).variables).toEqual({ id: 'i1', input: { stateId: 's2' } });
+    await expect(client.setIssueStateByName('i1', 'Shipped')).rejects.toThrow('Linear state "Shipped" not found');
+  });
+});

@@ -11,6 +11,7 @@ export interface SlackClient {
 }
 
 export type LinearIssueState = LinearIssueRef & { status: string; labels: string[]; updatedAt: string };
+export type LinearIssueDetails = LinearIssueRef & { description: string; comments: string[] };
 export type LinearCandidate = LinearIssueRef & { status: string; description: string; closedAt: string | null };
 export interface LinearClient {
   viewer(): Promise<{ id: string; name: string }>;
@@ -18,6 +19,11 @@ export interface LinearClient {
   searchIssues(term: string, teamKey: string, first: number): Promise<LinearCandidate[]>;
   getTeamId(teamKey: string): Promise<string>;
   getIssue(idOrIdentifier: string): Promise<LinearIssueRef | null>;
+  getIssueDetails(idOrIdentifier: string): Promise<LinearIssueDetails | null>;
+  commentExists(id: string): Promise<boolean>;
+  /** `id` is a client-generated UUID v4 that Linear uses as the comment id. */
+  createComment(input: { id: string; issueId: string; body: string }): Promise<void>;
+  setIssueStateByName(issueId: string, stateName: string): Promise<void>;
   /** `id` is a client-generated UUID v4 that Linear uses as the issue id. */
   createIssue(input: { id: string; teamId: string; title: string; description: string }): Promise<LinearIssueRef>;
   attachUrl(issueId: string, url: string, title: string): Promise<void>;

@@ -5,6 +5,7 @@ import type {
   GitHubClient,
   LinearCandidate,
   LinearClient,
+  LinearIssueDetails,
   LinearIssueState,
   PrRef,
   PrStatus,
@@ -68,6 +69,11 @@ export class FakeLinear implements LinearClient {
   attached: { issueId: string; url: string; title: string }[] = [];
   failures: Partial<Record<keyof LinearClient, Error>> = {};
   private nextNumber = 100;
+  details = new Map<string, LinearIssueDetails>();
+  comments: { id: string; issueId: string; body: string }[] = [];
+  stateChanges: { issueId: string; stateName: string }[] = [];
+  teamStates = ['Todo', 'In Progress', 'Done'];
+  loseNextCommentResponse = false;
 
   private maybeFail(method: keyof LinearClient): void {
     const err = this.failures[method];
@@ -134,6 +140,34 @@ export class FakeLinear implements LinearClient {
     this.attached.push({ issueId, url, title });
     const ref = this.issues.get(issueId);
     if (ref) this.attachmentsByUrl.set(url, ref);
+  }
+
+  async getIssueDetails(idOrIdentifier: string) {
+    this.maybeFail('getIssueDetails');
+    return this.details.get(idOrIdentifier) ?? null;
+  }
+
+  async commentExists(id: string) {
+    this.maybeFail('commentExists');
+    return this.comments.some((c) => c.id === id);
+  }
+
+  async createComment(input: { id: string; issueId: string; body: string }) {
+    this.maybeFail('createComment');
+    if (this.comments.some((c) => c.id === input.id)) throw new PermanentError(`Linear API error: comment ${input.id} already exists`);
+    this.comments.push(input);
+    if (this.loseNextCommentResponse) {
+      this.loseNextCommentResponse = false;
+      throw new TransientError('timeout');
+    }
+  }
+
+  async setIssueStateByName(issueId: string, stateName: string) {
+    this.maybeFail('setIssueStateByName');
+    if (!this.teamStates.some((s) => s.toLowerCase() === stateName.toLowerCase())) {
+      throw new PermanentError(`Linear state "${stateName}" not found`);
+    }
+    this.stateChanges.push({ issueId, stateName });
   }
 
   async findIssueByAttachmentUrl(url: string) {
