@@ -3,7 +3,7 @@ import type { Rule } from '@/core/config/schema';
 import type { Db } from '@/core/db/client';
 import { eq } from 'drizzle-orm';
 import { items, jobs, sourceEvents } from '@/core/db/schema';
-import type { LinearStatusEvent, SlackReactionEvent } from '@/core/events';
+import type { LinearLabelEvent, LinearStatusEvent, SlackReactionEvent } from '@/core/events';
 import { createTestDb } from '@/test/db';
 import { ingestEvent } from './ingest';
 import { listActivity } from './items';
@@ -75,5 +75,24 @@ describe('ingestEvent', () => {
     const result = ingestEvent(db, event, 'linear:i1:status:Triage:t', rules, 10);
     expect(result.item).toMatchObject({ linearIdentifier: 'ENG-1', triageState: null, category: 'triage' });
     expect(db.select().from(jobs).all()).toHaveLength(0);
+  });
+});
+
+describe('start-investigation rule', () => {
+  const investigateRules: Rule[] = [
+    { when: { source: 'linear', label: 'ready-to-investigate' }, category: 'triage', action: 'start-investigation' },
+  ];
+  const labeled = (issueId = 'i5'): LinearLabelEvent => ({
+    source: 'linear',
+    kind: 'label_added',
+    label: 'ready-to-investigate',
+    issue: { id: issueId, identifier: 'BOO-5', title: 'Bug', url: 'u' },
+  });
+
+  it('starts an investigation once for a new Linear item', () => {
+    const result = ingestEvent(db, labeled(), 'linear:i5:label:ready-to-investigate:t1', investigateRules, 10);
+    expect(result.item).toMatchObject({ workState: 'investigating' });
+    ingestEvent(db, labeled(), 'linear:i5:label:ready-to-investigate:t2', investigateRules, 20);
+    expect(db.select().from(jobs).all()).toMatchObject([{ type: 'investigate' }]);
   });
 });

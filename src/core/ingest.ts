@@ -12,7 +12,7 @@ import {
   upsertLinearItem,
   upsertSlackItem,
 } from './items';
-import { enqueueJob } from './jobs/queue';
+import { enqueueJob, hasActiveJob } from './jobs/queue';
 import { rearmStrandedJob } from './jobs/rearm';
 import { matchRule, type RuleMatch } from './rules/match';
 import { writeTransaction } from './db/tx';
@@ -60,6 +60,16 @@ function applyRuleMatch(db: Db, event: SourceEvent, eventId: number, match: Rule
   if (match.action === 'triage-draft' && item.triageState === null) {
     updateItem(db, item.id, { triageState: 'new' }, now);
     enqueueJob(db, 'triage-draft', item.id, {}, now);
+  } else if (
+    match.action === 'start-investigation' &&
+    item.workState === null &&
+    item.linearIssueId &&
+    item.category !== 'dismissed' &&
+    !hasActiveJob(db, item.id)
+  ) {
+    updateItem(db, item.id, { workState: 'investigating' }, now);
+    enqueueJob(db, 'investigate', item.id, {}, now);
+    logActivity(db, item.id, 'Investigation started by rule', now);
   } else if (before?.category === 'dismissed' && item.category !== 'dismissed') {
     const job = rearmStrandedJob(db, item, now);
     if (job) logActivity(db, item.id, `Resuming ${job.type}`, now);

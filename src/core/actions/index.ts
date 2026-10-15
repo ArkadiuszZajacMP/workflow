@@ -6,3 +6,4 @@ export { move } from './move';
 export { notDuplicate } from './not-duplicate';
 export { retry } from './retry';
 export { revise } from './revise';
+export { approvePlan, editPlan, fixPr, removeWorkspace, retryWork, revisePlan, startInvestigation, stopRun } from './work';
