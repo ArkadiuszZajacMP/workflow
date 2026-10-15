@@ -70,6 +70,9 @@ function parseAuthorization(stdout: string): { authorizationToken: string; expir
   return { authorizationToken: token, expiration: record.expiration };
 }
 
+/** Token files `withRegistryAuth` writes. Removed before investigation runs in case a killed install left them. */
+export const REGISTRY_AUTH_FILES = ['.npmrc', '.yarnrc.yml'] as const;
+
 export function registryAuthKey(registry: string): string {
   const url = new URL(registry);
   return `//${url.host}${url.pathname}`;
@@ -78,14 +81,14 @@ export function registryAuthKey(registry: string): string {
 /**
  * Runs with $1 = npmrc auth key and $2 = registry URL, passed as positional
  * parameters so no value is ever spliced into shell code. $CODEARTIFACT_AUTH_TOKEN
- * comes from `--env`. Both rc files are private and removed when the command exits.
+ * comes from `--env`. Both rc files are private and removed when the command exits or the shell is signalled.
  */
 const WITH_AUTH_SCRIPT = [
   'umask 077',
   'key="$1"; registry="$2"; shift 2',
+  'trap \'rm -f "$HOME/.npmrc" "$HOME/.yarnrc.yml"\' EXIT INT TERM HUP',
   'printf \'%s:_authToken=%s\\n\' "$key" "$CODEARTIFACT_AUTH_TOKEN" > "$HOME/.npmrc"',
   'printf \'npmRegistries:\\n  "%s":\\n    npmAuthToken: "%s"\\n    npmAlwaysAuth: true\\n\' "$registry" "$CODEARTIFACT_AUTH_TOKEN" > "$HOME/.yarnrc.yml"',
-  'trap \'rm -f "$HOME/.npmrc" "$HOME/.yarnrc.yml"\' EXIT',
   '"$@"',
 ].join('\n');
 

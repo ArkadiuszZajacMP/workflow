@@ -1,14 +1,17 @@
-import { eq } from 'drizzle-orm';
+import { eq, ne } from 'drizzle-orm';
 import type { Db } from '@/core/db/client';
-import { agentRuns, AGENT_JOB_TYPES, items, jobs } from '@/core/db/schema';
+import { agentRuns, AGENT_JOB_TYPES, items, jobs, workspaces } from '@/core/db/schema';
 import { writeTransaction } from '@/core/db/tx';
 import { workspaceName } from '@/core/work/workspaces';
 import type { ContainerEngine } from './engine';
 
+const PKILL_TIMEOUT_MS = 10_000;
+
 /**
- * Run at worker start, before `recoverRunningJobs`. A crash can leave `claude` running in a container and
- * `agent_runs` rows stuck in `running`. Kills the stray processes (best effort, the container may be gone)
- * and marks the leftover runs stopped.
+ * Run at worker start, before `recoverRunningJobs`. A crash or a killed worker can leave `claude` running in a
+ * container and `agent_runs` rows stuck in `running`. No agent can legitimately run at startup, so this kills
+ * `claude` in every workspace that is not removed and in the container of every running agent job (best effort,
+ * the container may be gone), then marks the leftover runs stopped.
  */
 export async function cleanupStaleAgentRuns(
   db: Db,
@@ -27,9 +30,12 @@ export async function cleanupStaleAgentRuns(
         .filter((r): r is { identifier: string; type: typeof r.type } => !!r.identifier && types.has(r.type))
         .map((r) => workspaceName(r.identifier)),
     );
+    for (const ws of db.select({ container: workspaces.container }).from(workspaces).where(ne(workspaces.status, 'removed')).all()) {
+      agentContainers.add(ws.container);
+    }
     for (const container of agentContainers) {
       try {
-        await engine.exec({ container, args: ['pkill', '-TERM', '-f', 'claude'], timeoutMs: 10_000 });
+        await engine.exec({ container, args: ['pkill', '-TERM', '-f', 'claude'], timeoutMs: PKILL_TIMEOUT_MS });
       } catch {
         // Best effort: the container may not exist.
       }

@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { and, desc, eq } from 'drizzle-orm';
 import type { Db } from '../db/client';
 import { type Item, type Job, type JobType, jobs, type TriageState, type WorkState } from '../db/schema';
-import { firstUnfinishedPr, updatePlannedPr } from '../work/planned-prs';
+import { allPrsOpen, firstUnfinishedPr, updatePlannedPr } from '../work/planned-prs';
+import { finishImplementation } from '../work/state';
 import { enqueueJob, hasActiveJob, type JobPayloads } from './queue';
 
 /** The job that moves an item on from each job-driven triage state. */
@@ -49,7 +50,11 @@ export function rearmStrandedJob(db: Db, item: Item, now = Date.now()): Job | nu
   if (!workType) return null;
   if (workType === 'implement-pr') {
     const pr = firstUnfinishedPr(db, item.id);
-    if (!pr) return null;
+    if (!pr) {
+      // Every PR opened while the item was dismissed: finish implementation as the last implement job would have.
+      if (allPrsOpen(db, item.id)) finishImplementation(db, item.id, now);
+      return null;
+    }
     if (pr.state !== 'pending') updatePlannedPr(db, pr.id, { state: 'pending' }, now);
     return enqueueJob(db, 'implement-pr', item.id, { plannedPrId: pr.id }, now);
   }

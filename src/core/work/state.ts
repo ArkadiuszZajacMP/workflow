@@ -11,6 +11,14 @@ export function applyWorkEvent(db: Db, itemId: number, event: WorkEvent, now = D
   return updateItem(db, itemId, { workState: result.state, lastError: null }, now);
 }
 
+/** Every planned PR is open: implementation is finished and the item moves to Verification. */
+export function finishImplementation(db: Db, itemId: number, now = Date.now()): Item {
+  applyWorkEvent(db, itemId, { type: 'all_prs_open' }, now);
+  const item = updateItem(db, itemId, { category: 'verification' }, now);
+  logActivity(db, itemId, 'All planned PRs are open; moved to Verification', now);
+  return item;
+}
+
 export function markWorkFailed(
   db: Db,
   itemId: number,

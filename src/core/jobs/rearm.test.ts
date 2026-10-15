@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Db } from '@/core/db/client';
 import { type Item, jobs } from '@/core/db/schema';
-import { getItem } from '@/core/items';
+import { getItem, listActivity } from '@/core/items';
 import { createPlannedPrs, getPlannedPr, updatePlannedPr } from '@/core/work/planned-prs';
 import { savePlan } from '@/core/work/plans';
 import { createTestDb } from '@/test/db';
@@ -65,10 +65,12 @@ describe('rearmStrandedJob work states', () => {
     expect(getPlannedPr(db, prs[1]!.id)?.state).toBe('pending');
   });
 
-  it('enqueues nothing when every PR is open', () => {
+  it('finishes implementation instead of enqueueing when every PR is open', () => {
     const { item } = withPrs(['open', 'open']);
     expect(rearmStrandedJob(db, item, 5)).toBeNull();
     expect(queued()).toEqual([]);
+    expect(getItem(db, item.id)).toMatchObject({ workState: 'prs_open', category: 'verification' });
+    expect(listActivity(db, item.id).at(-1)?.message).toBe('All planned PRs are open; moved to Verification');
   });
 
   it('enqueues nothing when a job is already active', () => {

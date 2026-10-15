@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, notInArray } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, ne, notInArray, or } from 'drizzle-orm';
 import { prKey } from '@/core/clients/github';
 import type { GitHubClient } from '@/core/clients/types';
 import { recordPollError, recordPollSuccess } from '@/core/cursors';
@@ -6,12 +6,14 @@ import type { Db } from '@/core/db/client';
 import { items, plannedPrs } from '@/core/db/schema';
 import { TransientError, errorMessage } from '@/core/errors';
 import { writeTransaction } from '@/core/db/tx';
-import { updatePlannedPr } from '@/core/work/planned-prs';
+import { logActivity } from '@/core/items';
+import { PR_CLOSED_ERROR, updatePlannedPr } from '@/core/work/planned-prs';
 
-type Row = { id: number; repo: string; number: number };
+type Row = { id: number; itemId: number; repo: string; number: number };
 
 /**
  * Refreshes draft/merged, unresolved threads and CI state for open, unmerged PRs of items still in implementation.
+ * A PR merged or closed on GitHub is recorded (merged, or `PR_CLOSED_ERROR`) and not polled again.
  * PRs are fetched one repo at a time so a failing repo (SSO, archived, forbidden) cannot block the others.
  * `intervalMs` is the normal poll interval; a rate-limit `retryAfterMs` longer than it delays the next attempt.
  */
@@ -20,20 +22,21 @@ export async function pollGithub(
   now = Date.now(),
 ): Promise<{ updated: number; failed: number }> {
   const rows: Row[] = deps.db
-    .select({ id: plannedPrs.id, repo: plannedPrs.githubRepo, number: plannedPrs.prNumber })
+    .select({ id: plannedPrs.id, itemId: plannedPrs.itemId, repo: plannedPrs.githubRepo, number: plannedPrs.prNumber })
     .from(plannedPrs)
     .innerJoin(items, eq(items.id, plannedPrs.itemId))
     .where(
       and(
         eq(plannedPrs.state, 'open'),
         eq(plannedPrs.merged, false),
+        or(isNull(plannedPrs.lastError), ne(plannedPrs.lastError, PR_CLOSED_ERROR)),
         isNotNull(plannedPrs.prNumber),
         inArray(items.workState, ['implementing', 'prs_open']),
         notInArray(items.category, ['done', 'dismissed']),
       ),
     )
     .all()
-    .map((r) => ({ id: r.id, repo: r.repo, number: r.number! }));
+    .map((r) => ({ id: r.id, itemId: r.itemId, repo: r.repo, number: r.number! }));
 
   const byRepo = new Map<string, Row[]>();
   for (const row of rows) byRepo.set(row.repo, [...(byRepo.get(row.repo) ?? []), row]);
@@ -50,12 +53,23 @@ export async function pollGithub(
         for (const row of chunk) {
           const status = statuses.get(prKey(row.repo, row.number));
           if (!status) continue;
+          const merged = status.merged || status.state === 'MERGED';
+          const closed = !merged && status.state === 'CLOSED';
           updatePlannedPr(
             tx,
             row.id,
-            { isDraft: status.isDraft, merged: status.merged, unresolvedThreads: status.unresolvedThreads, ciState: status.ciState, polledAt: now },
+            {
+              isDraft: status.isDraft,
+              merged,
+              unresolvedThreads: status.unresolvedThreads,
+              ciState: status.ciState,
+              polledAt: now,
+              ...(closed ? { lastError: PR_CLOSED_ERROR } : {}),
+            },
             now,
           );
+          if (merged) logActivity(tx, row.itemId, `${row.repo}#${row.number} was merged`, now);
+          if (closed) logActivity(tx, row.itemId, `${row.repo}#${row.number} was closed on GitHub without merging`, now);
           count++;
         }
         return count;

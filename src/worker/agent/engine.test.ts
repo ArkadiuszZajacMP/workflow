@@ -58,8 +58,20 @@ describe('PodmanEngine', () => {
       ['exec', '-i', 'c', 'claude'],
       ['exec', 'c', 'pkill', '-TERM', '-f', 'claude'],
     ]);
+    expect(first.calls[1]?.opts).toEqual({ timeoutMs: 15_000 });
     const second = scripted({});
     await new PodmanEngine('podman', second.run).exec({ container: 'c', args: ['claude'] });
     expect(second.calls).toHaveLength(1);
+  });
+
+  it('stops the command inside the container when the exec client is killed by a signal', async () => {
+    for (const result of [{ ...ok(), exitCode: -1, signal: 'SIGINT' as const }, { ...ok(), exitCode: -1 }]) {
+      const s = scripted({ exec: result });
+      await new PodmanEngine('podman', s.run).exec({ container: 'c', args: ['claude'] });
+      expect(s.calls.map((c) => c.args)[1]).toEqual(['exec', 'c', 'pkill', '-TERM', '-f', 'claude']);
+    }
+    const failed = scripted({ exec: fail() });
+    await new PodmanEngine('podman', failed.run).exec({ container: 'c', args: ['claude'] });
+    expect(failed.calls).toHaveLength(1);
   });
 });

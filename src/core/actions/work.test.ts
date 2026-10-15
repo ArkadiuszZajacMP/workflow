@@ -11,6 +11,8 @@ import { createWorkspaceRow, updateWorkspace } from '@/core/work/workspaces';
 import { createTestDb } from '@/test/db';
 import { TEST_REPO_MAP } from '@/test/repo-map';
 import { seedItem } from '@/test/seed';
+import { discard } from './discard';
+import { move } from './move';
 import { approvePlan, editPlan, fixPr, removeWorkspace, retryWork, revisePlan, startInvestigation, stopRun } from './work';
 
 const plan = { body: 'Scope the parser.', breakdown: [{ repo: 'core', scope: 'Scope raw parser' }] };
@@ -124,6 +126,12 @@ describe('fixPr, stopRun and removeWorkspace', () => {
     expect(() => fixPr(db, other.id, pr.id)).toThrow(/not part of item/);
   });
 
+  it('refuses a fix round on a merged PR', () => {
+    const { item, pr } = withOpenPr();
+    updatePlannedPr(db, pr.id, { merged: true }, 3);
+    expect(() => fixPr(db, item.id, pr.id)).toThrow(/already merged/);
+  });
+
   it('stops only a running agent job', () => {
     const { item, pr } = withOpenPr();
     expect(() => stopRun(db, item.id)).toThrow(/No agent run/);
@@ -131,6 +139,29 @@ describe('fixPr, stopRun and removeWorkspace', () => {
     claimNextJob(db, 1);
     stopRun(db, item.id, 2);
     expect(isStopRequested(db, job.id)).toBe(true);
+  });
+
+  it('stops a running agent job of a dismissed item, but still needs one', () => {
+    const { item, pr } = withOpenPr();
+    db.update(items).set({ category: 'dismissed' }).where(eq(items.id, item.id)).run();
+    expect(() => stopRun(db, item.id)).toThrow(/No agent run/);
+    const job = enqueueJob(db, 'fix-pr', item.id, { plannedPrId: pr.id }, 1);
+    claimNextJob(db, 1);
+    stopRun(db, item.id, 2);
+    expect(isStopRequested(db, job.id)).toBe(true);
+  });
+
+  it('requests a stop of the running agent job when the item is dismissed', () => {
+    const dismissals = [(id: number) => discard(db, id, 3), (id: number) => move(db, id, 'dismissed', 3)];
+    dismissals.forEach((dismiss, i) => {
+      const item = linearItem({ linearIssueId: `d${i}`, linearIdentifier: `BOO-${20 + i}`, workState: 'investigating' });
+      const job = enqueueJob(db, 'investigate', item.id, {}, 1);
+      claimNextJob(db, 1);
+      dismiss(item.id);
+      expect(isStopRequested(db, job.id)).toBe(true);
+    });
+    const quiet = linearItem({ linearIssueId: 'i5', linearIdentifier: 'BOO-5' });
+    expect(() => discard(db, quiet.id, 4)).not.toThrow();
   });
 
   it('enqueues workspace removal when a workspace exists', () => {

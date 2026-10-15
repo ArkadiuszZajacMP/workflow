@@ -33,4 +33,10 @@ describe('workFlags', () => {
     });
     expect(workFlags({ ...base, item: { ...base.item, workState: 'failed' } }).canRetry).toBe(true);
   });
+
+  it('keeps a running agent stoppable after the item is dismissed', () => {
+    const dismissed = { ...base.item, category: 'dismissed' as const, workState: 'implementing' as const };
+    expect(workFlags({ ...base, item: dismissed, activeJob: true, activeRun: true }).canStop).toBe(true);
+    expect(workFlags({ ...base, item: dismissed, activeJob: true, activeRun: false }).canStop).toBe(false);
+  });
 });

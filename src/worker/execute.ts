@@ -1,8 +1,8 @@
 import type { Db } from '@/core/db/client';
 import type { Job } from '@/core/db/schema';
-import { errorMessage, ShutdownStop } from '@/core/errors';
+import { errorMessage, PermanentError, ShutdownStop } from '@/core/errors';
 import { getItem, logActivity } from '@/core/items';
-import { completeJob, failJob, recordJobFailure, requeueAfterShutdown } from '@/core/jobs/queue';
+import { completeJob, failJob, isStopRequested, recordJobFailure, requeueAfterShutdown } from '@/core/jobs/queue';
 
 /**
  * Runs one claimed job and records the outcome. Shared by the core lane and the agent lane.
@@ -14,7 +14,18 @@ export async function executeJob(db: Db, job: Job, run: () => Promise<void>, now
   try {
     await run();
     completeJob(db, job.id, now());
-  } catch (err) {
+  } catch (caught) {
+    let err = caught;
+    if (err instanceof ShutdownStop) {
+      let stopRequested = false;
+      try {
+        stopRequested = isStopRequested(db, job.id);
+      } catch {
+        // Fall back to requeueing; a pending Stop is still honoured by the next run's stop poll.
+      }
+      // A user Stop that arrived during shutdown wins: fail the job as stopped instead of requeueing it.
+      if (stopRequested) err = new PermanentError('Run stopped by user');
+    }
     if (err instanceof ShutdownStop) {
       try {
         requeueAfterShutdown(db, job, now());

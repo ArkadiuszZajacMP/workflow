@@ -58,6 +58,9 @@ export function getPlannedPr(db: Db, id: number): PlannedPr | undefined {
   return db.select().from(plannedPrs).where(eq(plannedPrs.id, id)).get();
 }
 
+/** Set by the GitHub poller on a PR closed without merging; such PRs are no longer polled. */
+export const PR_CLOSED_ERROR = 'PR was closed on GitHub';
+
 export function updatePlannedPr(db: Db, id: number, patch: PlannedPrPatch, now = Date.now()): PlannedPr {
   return db
     .update(plannedPrs)

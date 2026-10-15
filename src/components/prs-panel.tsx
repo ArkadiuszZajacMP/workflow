@@ -1,10 +1,10 @@
-"use client";
+'use client';
 
-import { fixPrAction } from "@/app/actions";
-import { Button } from "@/components/ui/button";
-import type { AgentRun, PlannedPr } from "@/core/db/schema";
-import { CI_LABELS, formatAge } from "@/lib/format";
-import { useActionRunner } from "./use-action-runner";
+import { fixPrAction } from '@/app/actions';
+import { Button } from '@/components/ui/button';
+import type { AgentRun, PlannedPr } from '@/core/db/schema';
+import { CI_LABELS, formatAge } from '@/lib/format';
+import { useActionRunner } from './use-action-runner';
 
 export function PrsPanel({
   itemId,
@@ -26,50 +26,34 @@ export function PrsPanel({
       <h3 className="text-sm font-semibold">Pull requests</h3>
       <ul className="space-y-2">
         {prs.map((pr) => {
-          const last = runs
-            .filter((r) => r.plannedPrId === pr.id)
-            .sort((a, b) => b.startedAt - a.startedAt)[0];
+          const last = runs.filter((r) => r.plannedPrId === pr.id).sort((a, b) => b.startedAt - a.startedAt)[0];
           return (
             <li key={pr.id} className="space-y-1 rounded-md border p-3 text-sm">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-muted-foreground">{pr.position}.</span>
                 <span className="font-mono">{pr.repoKey}</span>
                 {pr.prUrl ? (
-                  <a
-                    className="underline-offset-4 hover:underline"
-                    href={pr.prUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
+                  <a className="underline-offset-4 hover:underline" href={pr.prUrl} target="_blank" rel="noreferrer">
                     #{pr.prNumber}
                   </a>
                 ) : (
                   <span className="text-muted-foreground">{pr.state}</span>
                 )}
-                {pr.state === "open" && (
+                {pr.state === 'open' && (
                   <>
                     <span title={CI_LABELS[pr.ciState].label}>
                       <span aria-hidden>{CI_LABELS[pr.ciState].symbol}</span>
-                      <span className="sr-only">
-                        {CI_LABELS[pr.ciState].label}
-                      </span>
+                      <span className="sr-only">{CI_LABELS[pr.ciState].label}</span>
                     </span>
                     <span title="Unresolved review threads">
                       <span aria-hidden>💬</span> {pr.unresolvedThreads}
-                      <span className="sr-only">
-                        {" "}
-                        unresolved review threads
-                      </span>
+                      <span className="sr-only"> unresolved review threads</span>
                     </span>
-                    {pr.isDraft && (
-                      <span className="text-muted-foreground">draft</span>
-                    )}
-                    {pr.merged && (
-                      <span className="text-muted-foreground">merged</span>
-                    )}
+                    {pr.isDraft && <span className="text-muted-foreground">draft</span>}
+                    {pr.merged && <span className="text-muted-foreground">merged</span>}
                   </>
                 )}
-                {canFix && pr.state === "open" && (
+                {canFix && pr.state === 'open' && !pr.merged && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -84,13 +68,10 @@ export function PrsPanel({
               <p className="text-muted-foreground">{pr.scope}</p>
               {last && (
                 <p className="text-muted-foreground">
-                  last run: {last.outcome} ·{" "}
-                  {formatAge(last.endedAt ?? last.startedAt, now)} ago
+                  last run: {last.outcome} · {formatAge(last.endedAt ?? last.startedAt, now)} ago
                 </p>
               )}
-              {pr.lastError && (
-                <p className="text-destructive">{pr.lastError}</p>
-              )}
+              {pr.lastError && <p className="text-destructive">{pr.lastError}</p>}
             </li>
           );
         })}

@@ -8,6 +8,7 @@ import {
   move,
   removeWorkspace,
   retry,
+  retryWork,
   revise,
   revisePlan,
   startInvestigation,
@@ -19,6 +20,7 @@ import { ActionError, errorMessage } from '@/core/errors';
 import { getItemDetail, listItems } from '@/core/queries';
 import { loadCurrentRepoMap } from '@/core/repos/current';
 import type { RepoMap } from '@/core/repos/map';
+import { getItem } from '@/core/items';
 import { listPlannedPrs } from '@/core/work/planned-prs';
 import { latestPlan, renderPlanComment } from '@/core/work/plans';
 
@@ -93,7 +95,13 @@ export function buildProgram(db: Db, io: Io, repoMap: () => RepoMap = loadCurren
   program.command('move <id> <category>').action(run((id: string, category: string) => printItem(move(db, parseId(id), category as Category))));
   program.command('approve <id>').action(run((id: string) => printItem(approve(db, parseId(id)))));
   program.command('discard <id>').action(run((id: string) => printItem(discard(db, parseId(id)))));
-  program.command('retry <id>').action(run((id: string) => printItem(retry(db, parseId(id)))));
+  program.command('retry <id>').action(
+    run((id: string) => {
+      const itemId = parseId(id);
+      // Failed work (investigation, plan posting, implementation) has its own retry; otherwise retry triage.
+      printItem(getItem(db, itemId)?.workState === 'failed' ? retryWork(db, itemId) : retry(db, itemId));
+    }),
+  );
   program.command('link <id> <identifier>').action(run((id: string, identifier: string) => printItem(link(db, parseId(id), { identifier }))));
   program.command('revise <id> <feedback>').action(run((id: string, feedback: string) => printItem(revise(db, parseId(id), feedback))));
 

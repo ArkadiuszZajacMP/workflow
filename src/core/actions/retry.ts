@@ -1,16 +1,19 @@
 import type { Db } from '../db/client';
-import type { Item } from '../db/schema';
+import type { Item, JobType } from '../db/schema';
 import { ActionError } from '../errors';
 import { applyTriageEvent, logActivity, updateItem } from '../items';
 import { latestFailedJob, requeueJob } from '../jobs/queue';
 import { requireActiveItem } from './guards';
 import { writeTransaction } from '../db/tx';
 
+/** Jobs whose failure fails triage. Work and agent jobs are retried with `retryWork`. */
+const TRIAGE_JOB_TYPES: readonly JobType[] = ['triage-draft', 'draft', 'create-linear-issue', 'link-linear-issue'];
+
 export function retry(db: Db, itemId: number, now = Date.now()): Item {
   return writeTransaction(db, (tx) => {
     const item = requireActiveItem(tx, itemId);
     if (item.triageState !== 'failed') throw new ActionError(`Item #${itemId} has not failed`);
-    const job = latestFailedJob(tx, itemId);
+    const job = latestFailedJob(tx, itemId, TRIAGE_JOB_TYPES);
     if (!job) throw new ActionError(`Item #${itemId} has no failed job to retry`);
     applyTriageEvent(tx, itemId, { type: 'retry', to: item.failedFromState ?? 'new' }, now);
     requeueJob(tx, job.id, now);

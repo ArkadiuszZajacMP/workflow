@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { claimNextJob, enqueueJob } from '@/core/jobs/queue';
 import { getRun, startRun } from '@/core/work/runs';
+import { createWorkspaceRow, updateWorkspace } from '@/core/work/workspaces';
 import { createTestDb } from '@/test/db';
 import { FakeEngine } from '@/test/fake-engine';
 import { seedItem } from '@/test/seed';
@@ -31,5 +32,18 @@ describe('cleanupStaleAgentRuns', () => {
     await expect(cleanupStaleAgentRuns(db, failing, 9)).resolves.toEqual({ stopped: 1 });
     expect(getRun(db, run.id)?.outcome).toBe('stopped');
     await expect(cleanupStaleAgentRuns(db, null, 10)).resolves.toEqual({ stopped: 0 });
+  });
+
+  it('kills claude in every workspace that is not removed, even when its job is no longer running', async () => {
+    const db = createTestDb();
+    const engine = new FakeEngine();
+    for (const [n, status] of [[1, 'ready'], [2, 'broken'], [3, 'creating'], [4, 'removed']] as const) {
+      const item = seedItem(db, { linearIssueId: `w${n}`, linearIdentifier: `BOO-${n}` });
+      createWorkspaceRow(db, { itemId: item.id, container: `wf-boo-${n}`, volume: `wf-boo-${n}`, image: 'img' }, 0);
+      updateWorkspace(db, item.id, { status }, 0);
+    }
+    await cleanupStaleAgentRuns(db, engine, 1);
+    expect(engine.execs.map((e) => e.container).sort()).toEqual(['wf-boo-1', 'wf-boo-2', 'wf-boo-3']);
+    expect(engine.execs.every((e) => e.args.join(' ') === 'pkill -TERM -f claude' && e.timeoutMs === 10_000)).toBe(true);
   });
 });

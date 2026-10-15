@@ -108,4 +108,32 @@ describe('AgentLane', () => {
     lane.fill();
     await expect(lane.shutdown(20)).resolves.toEqual({ timedOut: true });
   });
+
+  it('abort stops claiming and aborts in-flight runs right away, before shutdown drains them', async () => {
+    const db = createTestDb();
+    const { deps } = makeAgentDeps(db);
+    const first = enqueueJob(db, 'investigate', seedItem(db).id, {}, 0);
+    enqueueJob(db, 'investigate', seedItem(db).id, {}, 0);
+    let aborted = false;
+    const handler: AgentHandler = (d) =>
+      new Promise((_resolve, reject) => {
+        d.shutdownSignal!.addEventListener('abort', () => {
+          aborted = true;
+          reject(new ShutdownStop());
+        });
+      });
+    const lane = new AgentLane(() => ({ ...deps, config: { ...deps.config, agent: { ...deps.config.agent, maxConcurrent: 1 } } }), {
+      investigate: handler,
+      'implement-pr': handler,
+      'fix-pr': handler,
+      'remove-workspace': handler,
+    });
+    expect(lane.fill()).toBe(1);
+    lane.abort();
+    lane.abort();
+    expect(aborted).toBe(true);
+    expect(lane.fill()).toBe(0);
+    await expect(lane.shutdown(2000)).resolves.toEqual({ timedOut: false });
+    expect(db.select().from(jobs).where(eq(jobs.id, first.id)).get()?.status).toBe('queued');
+  });
 });

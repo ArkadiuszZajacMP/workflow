@@ -13,6 +13,7 @@ import { createTestDb } from '@/test/db';
 import { seedItem } from '@/test/seed';
 import { claudeArgs, INVESTIGATE_TOOLS, runAgent } from './run';
 
+const OK = { exitCode: 0, stdout: '', stderr: '', timedOut: false, aborted: false };
 const schema = z.object({ answer: z.number(), summary: z.string().optional() });
 let db: Db;
 beforeEach(() => {
@@ -77,6 +78,28 @@ describe('runAgent', () => {
     expect(listRuns(db, item.id)).toHaveLength(0);
   });
 
+  it('removes leftover registry token files before an investigation, but not before other runs', async () => {
+    const { deps, engine, item, job } = setup();
+    engine.replyClaude({ answer: 1 });
+    await runAgent(deps, { job, item, kind: 'investigate', prompt: 'P', schema, env: {} });
+    const rmIndex = engine.execs.findIndex((e) => e.args[0] === 'rm');
+    expect(engine.execs[rmIndex]).toMatchObject({ container: 'wf-boo-1', args: ['rm', '-f', '/home/node/.npmrc', '/home/node/.yarnrc.yml'] });
+    expect(rmIndex).toBeLessThan(engine.execs.findIndex(isClaudeExec));
+
+    engine.execs = [];
+    engine.replyClaude({ answer: 1 });
+    await runAgent(deps, { job, item, kind: 'implement-pr', prompt: 'P', schema, env: {} });
+    expect(engine.execs.some((e) => e.args[0] === 'rm')).toBe(false);
+  });
+
+  it('does not start an investigation when the token files cannot be removed', async () => {
+    const { deps, engine, item, job } = setup();
+    engine.on((r) => r.args[0] === 'rm', { exitCode: 1, stderr: 'read-only' });
+    engine.replyClaude({ answer: 1 });
+    await expect(runAgent(deps, { job, item, kind: 'investigate', prompt: 'P', schema, env: {} })).rejects.toBeInstanceOf(TransientError);
+    expect(engine.execs.filter(isClaudeExec)).toHaveLength(0);
+  });
+
   it('wraps the command with registry auth when a registry is given', async () => {
     const { deps, engine, item, job } = setup('implement-pr');
     engine.replyClaude({ answer: 1 });
@@ -128,6 +151,7 @@ describe('runAgent', () => {
   it('kills the run when a stop is requested', async () => {
     const { deps, engine, item, job } = setup();
     engine.exec = async (req) => {
+      if (!isClaudeExec(req)) return OK;
       await new Promise((resolve) => setTimeout(resolve, 1_500));
       return { exitCode: 143, stdout: '', stderr: '', timedOut: false, aborted: req.signal?.aborted ?? false };
     };
@@ -143,6 +167,7 @@ describe('runAgent', () => {
     const shutdown = new AbortController();
     deps.shutdownSignal = shutdown.signal;
     engine.exec = async (req) => {
+      if (!isClaudeExec(req)) return OK;
       shutdown.abort();
       return { exitCode: 143, stdout: '', stderr: '', timedOut: false, aborted: req.signal?.aborted ?? false };
     };
@@ -156,6 +181,7 @@ describe('runAgent', () => {
     const shutdown = new AbortController();
     deps.shutdownSignal = shutdown.signal;
     engine.exec = async (req) => {
+      if (!isClaudeExec(req)) return OK;
       requestStop(db, job.id);
       shutdown.abort();
       return { exitCode: 143, stdout: '', stderr: '', timedOut: false, aborted: req.signal?.aborted ?? false };
@@ -172,6 +198,18 @@ describe('runAgent', () => {
     );
     expect(getWorkspace(db, item.id)?.status).toBe('broken');
     expect(listRuns(db, item.id)[0]?.outcome).toBe('failed');
+  });
+
+  it('treats an exec killed by a signal (not our abort or timeout) as transient', async () => {
+    const { deps, engine, item, job } = setup();
+    engine.replyClaude({ exitCode: -1, signal: 'SIGINT', lines: [] }, { exitCode: -1, lines: [] });
+    for (let i = 0; i < 2; i++) {
+      await expect(runAgent(deps, { job, item, kind: 'investigate', prompt: 'P', schema, env: {} })).rejects.toBeInstanceOf(
+        TransientError,
+      );
+    }
+    expect(listRuns(db, item.id).map((r) => r.outcome)).toEqual(['failed', 'failed']);
+    expect(getWorkspace(db, item.id)?.status).not.toBe('broken');
   });
 
   it('passes the configured model', async () => {

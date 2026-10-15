@@ -1,7 +1,14 @@
 import type { ContainerEngine, ExecRequest } from '@/worker/agent/engine';
 import type { ProcessResult } from '@/worker/agent/process';
 
-export type FakeReply = { exitCode?: number; lines?: string[]; stderr?: string; timedOut?: boolean; aborted?: boolean };
+export type FakeReply = {
+  exitCode?: number;
+  lines?: string[];
+  stderr?: string;
+  timedOut?: boolean;
+  aborted?: boolean;
+  signal?: NodeJS.Signals;
+};
 
 export function isClaudeExec(req: ExecRequest): boolean {
   return req.args.includes('claude');
@@ -20,8 +27,13 @@ export function claudeStream(output: unknown, sessionId = 's-1'): string[] {
 export class FakeEngine implements ContainerEngine {
   images = new Set<string>();
   containers = new Set<string>();
-  /** Paths that `test -d <path>` reports as existing. `git clone <url> <dest>` adds `<dest>/.git`. */
+  /**
+   * Paths that `test -d <path>` reports as existing. `git clone <url> <dest>` adds `<dest>/.git`, and
+   * `git -C <dest> rev-parse` succeeds while `<dest>/.git` is present.
+   */
   dirs = new Set<string>();
+  /** Paths (`<repo dir>/<file>`) that `git -C <dir> ls-files --error-unmatch <file>` reports as tracked. */
+  trackedFiles = new Set<string>();
   built: string[] = [];
   removed: string[] = [];
   copies: { container: string; hostPath: string; containerPath: string }[] = [];
@@ -69,6 +81,12 @@ export class FakeEngine implements ContainerEngine {
       reply = this.claudeQueue.shift();
     } else if (req.args[0] === 'test' && req.args[1] === '-d') {
       reply = { exitCode: this.dirs.has(req.args[2]!) ? 0 : 1 };
+    } else if (req.args[0] === 'git' && req.args[1] === '-C' && req.args[3] === 'rev-parse') {
+      reply = { exitCode: this.dirs.has(`${req.args[2]}/.git`) ? 0 : 1 };
+    } else if (req.args[0] === 'git' && req.args[1] === '-C' && req.args[3] === 'ls-files') {
+      reply = { exitCode: this.trackedFiles.has(`${req.args[2]}/${req.args.at(-1)}`) ? 0 : 1 };
+    } else if (req.args[0] === 'rm' && req.args[1] === '-rf') {
+      for (const d of [...this.dirs]) if (d === req.args[2] || d.startsWith(`${req.args[2]}/`)) this.dirs.delete(d);
     } else if (req.args[0] === 'git' && req.args[1] === 'clone') {
       this.dirs.add(`${req.args[3]}/.git`);
     }
@@ -79,6 +97,7 @@ export class FakeEngine implements ContainerEngine {
       stderr: reply?.stderr ?? '',
       timedOut: reply?.timedOut ?? false,
       aborted: reply?.aborted ?? false,
+      signal: reply?.signal ?? null,
     };
   }
 

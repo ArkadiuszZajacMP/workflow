@@ -61,6 +61,8 @@ describe('implementPrHandler', () => {
     expect(prompt).toContain('PR 1 of 2');
     expect(prompt).toContain('Branch to create: boo-7-add-field');
     expect(prompt).toContain('yarn lint:quiet');
+    expect(prompt).toContain('git reset --hard && git clean -fd');
+    expect(prompt).not.toContain('clean -fdx');
   });
 
   it('moves the item to verification after the last PR', async () => {

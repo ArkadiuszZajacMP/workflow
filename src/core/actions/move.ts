@@ -2,6 +2,7 @@ import type { Db } from '../db/client';
 import { CATEGORIES, type Category, type Item } from '../db/schema';
 import { ActionError } from '../errors';
 import { logActivity, requireItem, updateItem } from '../items';
+import { requestAgentStop } from '../jobs/queue';
 import { rearmStrandedJob } from '../jobs/rearm';
 import { writeTransaction } from '../db/tx';
 
@@ -12,6 +13,10 @@ export function move(db: Db, itemId: number, category: Category, now = Date.now(
     if (item.category === category) return item;
     const updated = updateItem(tx, itemId, { category }, now);
     logActivity(tx, itemId, `Moved to ${category}`, now);
+    if (category === 'dismissed') {
+      const job = requestAgentStop(tx, itemId);
+      if (job) logActivity(tx, itemId, `Stop requested for ${job.type}`, now);
+    }
     if (item.category === 'dismissed') {
       const job = rearmStrandedJob(tx, updated, now);
       if (job) logActivity(tx, itemId, `Resuming ${job.type}`, now);

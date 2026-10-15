@@ -20,6 +20,7 @@ import { pollOnce, runNextJob } from './runner';
 
 const IDLE_MS = 2_000;
 const SHUTDOWN_GRACE_MS = 15_000;
+const FORCE_EXIT_AFTER_MS = 2_000;
 
 function requireEnv(name: string): string {
   const value = process.env[name];
@@ -93,9 +94,24 @@ async function main(): Promise<void> {
   const lane = new AgentLane(agentDeps);
 
   let stopping = false;
-  for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  let stoppingAt = 0;
+  let laneStopped: Promise<{ timedOut: boolean }> | null = null;
+  // SIGHUP too: run processes are detached, so closing the terminal no longer reaches them directly.
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
     process.on(signal, () => {
+      if (stopping) {
+        // `node --watch` and npm relay the terminal's Ctrl-C, so one keypress arrives as two signals at once.
+        // Only a later, deliberate second Ctrl-C forces the exit.
+        if (Date.now() - stoppingAt < FORCE_EXIT_AFTER_MS) return;
+        // Give up waiting. Detached run processes are killed on exit; recovery requeues their jobs.
+        console.log('[worker] Forced exit');
+        process.exit(1);
+      }
       stopping = true;
+      stoppingAt = Date.now();
+      // Abort agent runs now rather than after the current core job returns; the grace period starts here.
+      console.log(`[worker] stopping (${lane.size} agent run(s) in flight, waiting up to ${SHUTDOWN_GRACE_MS / 1000}s)`);
+      laneStopped = lane.shutdown(SHUTDOWN_GRACE_MS);
     });
   }
 
@@ -116,8 +132,7 @@ async function main(): Promise<void> {
     }
     await sleep(IDLE_MS);
   }
-  console.log(`[worker] stopping (${lane.size} agent run(s) in flight, waiting up to ${SHUTDOWN_GRACE_MS / 1000}s)`);
-  const { timedOut } = await lane.shutdown(SHUTDOWN_GRACE_MS);
+  const { timedOut } = await (laneStopped ?? lane.shutdown(SHUTDOWN_GRACE_MS));
   if (timedOut) console.log('[worker] Some agent runs did not stop in time; crash recovery handles them on the next start');
   process.exit(0);
 }

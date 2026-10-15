@@ -7,6 +7,7 @@ import { createTestDb } from '@/test/db';
 import { FakeGitHub } from '@/test/fakes';
 import { TEST_REPO_MAP } from '@/test/repo-map';
 import { seedItem } from '@/test/seed';
+import { listActivity } from '@/core/items';
 import { pollGithub } from './github';
 
 describe('pollGithub', () => {
@@ -62,6 +63,29 @@ describe('pollGithub', () => {
       updatePlannedPr(db, pr!.id, { state: 'open', prNumber: n, merged: item === merged }, 0);
     }
     await expect(pollGithub({ db, github }, 1)).resolves.toEqual({ updated: 0, failed: 0 });
+    expect(github.statusCalls).toEqual([]);
+  });
+
+  it('records PRs merged or closed on GitHub and stops polling them', async () => {
+    const db = createTestDb();
+    const github = new FakeGitHub();
+    const item = seedItem(db, { linearIssueId: 'i1', linearIdentifier: 'BOO-1', workState: 'prs_open' });
+    const plan = savePlan(db, item.id, { body: 'b', breakdown: [{ repo: 'core', scope: 'x' }, { repo: 'web', scope: 'y' }] }, 'user', null, 0);
+    const [merged, closed] = createPlannedPrs(db, item, plan, TEST_REPO_MAP, 0);
+    updatePlannedPr(db, merged!.id, { state: 'open', prNumber: 1 }, 0);
+    updatePlannedPr(db, closed!.id, { state: 'open', prNumber: 2, lastError: 'old fix failure' }, 0);
+    github.statuses.set('acme/core#1', { isDraft: false, merged: true, state: 'MERGED', unresolvedThreads: 0, ciState: 'success' });
+    github.statuses.set('acme/web#2', { isDraft: true, merged: false, state: 'CLOSED', unresolvedThreads: 0, ciState: 'none' });
+
+    await expect(pollGithub({ db, github }, 1)).resolves.toEqual({ updated: 2, failed: 0 });
+    expect(getPlannedPr(db, merged!.id)).toMatchObject({ merged: true, lastError: null });
+    expect(getPlannedPr(db, closed!.id)).toMatchObject({ merged: false, lastError: 'PR was closed on GitHub' });
+    expect(listActivity(db, item.id).map((a) => a.message)).toEqual(
+      expect.arrayContaining(['acme/core#1 was merged', 'acme/web#2 was closed on GitHub without merging']),
+    );
+
+    github.statusCalls.length = 0;
+    await expect(pollGithub({ db, github }, 2)).resolves.toEqual({ updated: 0, failed: 0 });
     expect(github.statusCalls).toEqual([]);
   });
 

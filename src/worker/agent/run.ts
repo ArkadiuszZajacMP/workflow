@@ -9,8 +9,9 @@ import { isStopRequested } from '@/core/jobs/queue';
 import { finishRun, startRun } from '@/core/work/runs';
 import { parseStreamLine } from '@/core/work/stream';
 import { updateWorkspace, workspaceName } from '@/core/work/workspaces';
-import { withRegistryAuth } from './codeartifact';
+import { REGISTRY_AUTH_FILES, withRegistryAuth } from './codeartifact';
 import type { AgentDeps } from './deps';
+import { CONTAINER_HOME } from './workspace';
 
 export const INVESTIGATE_TOOLS =
   'Read,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git grep:*),Bash(git diff:*),Bash(ls:*)';
@@ -74,7 +75,8 @@ function summarize(value: unknown): string {
 
 /**
  * Runs one Claude Code session inside the item's container and returns its validated final JSON.
- * Invalid output is resumed once. Timeouts and stops are permanent failures; podman exec failures are transient.
+ * Invalid output is resumed once. Timeouts and stops are permanent failures; podman exec failures and an exec
+ * killed by a signal from outside are transient.
  */
 export async function runAgent<T>(deps: AgentDeps, req: AgentRunRequest<T>): Promise<T> {
   if (!req.item.linearIdentifier) throw new PermanentError(`Item #${req.item.id} has no Linear issue`);
@@ -86,6 +88,17 @@ export async function runAgent<T>(deps: AgentDeps, req: AgentRunRequest<T>): Pro
   const timeoutMs = (investigate ? cfg.timeoutMinutes.investigate : cfg.timeoutMinutes.implement) * 60_000;
   const maxTurns = investigate ? cfg.maxTurns.investigate : cfg.maxTurns.implement;
   const container = workspaceName(req.item.linearIdentifier);
+  if (investigate) {
+    // An install killed before its trap ran could leave registry tokens in $HOME; investigation must never see them.
+    const cleared = await deps.engine.exec({
+      container,
+      args: ['rm', '-f', ...REGISTRY_AUTH_FILES.map((file) => `${CONTAINER_HOME}/${file}`)],
+      timeoutMs: 30_000,
+    });
+    if (cleared.exitCode !== 0) {
+      throw new TransientError(`Could not clear registry token files in ${container}: ${cleared.stderr.trim().slice(-300)}`);
+    }
+  }
   mkdirSync(deps.runsDir, { recursive: true });
   const logPath = path.join(deps.runsDir, `${req.job.id}-${deps.now()}-${randomUUID().slice(0, 8)}.jsonl`);
   const run = startRun(
@@ -140,6 +153,10 @@ export async function runAgent<T>(deps: AgentDeps, req: AgentRunRequest<T>): Pro
       if (ENGINE_EXIT_CODES.has(result.exitCode)) {
         updateWorkspace(deps.db, req.item.id, { status: 'broken' }, deps.now());
         throw new TransientError(`Container exec failed (${result.exitCode}): ${result.stderr.trim().slice(-300)}`);
+      }
+      if (result.signal || result.exitCode < 0) {
+        // The exec client was killed from outside (not by our abort or timeout): retry rather than fail the work.
+        throw new TransientError(`Container exec was killed (${result.signal ?? `exit ${result.exitCode}`}) before Claude finished`);
       }
       throw new PermanentError(`Claude exited with ${result.exitCode} without a result: ${result.stderr.trim().slice(-300)}`);
     }

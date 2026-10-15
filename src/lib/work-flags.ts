@@ -28,7 +28,8 @@ export function workFlags(input: {
     canApprove: canEditPlan && hasPlan,
     canRetry: idle && item.workState === 'failed',
     canFix: idle && (item.workState === 'implementing' || item.workState === 'prs_open'),
-    canStop: live && activeRun,
+    // A run can still be going after the item is dismissed; it must stay stoppable.
+    canStop: activeRun,
     canRemoveWorkspace: idle && workspace !== null && workspace.status !== 'removed',
     busy: activeJob,
   };

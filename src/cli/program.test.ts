@@ -89,6 +89,24 @@ describe('work commands', () => {
     expect(db.select().from(jobs).all()).toMatchObject([{ type: 'post-plan' }]);
   });
 
+  it('retries failed work through retry, and failed triage as before', async () => {
+    const db = createTestDb();
+    const item = seedItem(db, { linearIssueId: 'i1', linearIdentifier: 'BOO-1', workState: 'failed', workFailedFromState: 'investigating' });
+    db.insert(jobs)
+      .values({ type: 'investigate', itemId: item.id, payload: {}, status: 'failed', attempts: 1, runAfter: 0, createdAt: 0, updatedAt: 0 })
+      .run();
+    await runWithMap(db, 'retry', String(item.id));
+    expect(getItem(db, item.id)?.workState).toBe('investigating');
+    expect(db.select().from(jobs).all()).toMatchObject([{ type: 'investigate', status: 'queued' }]);
+
+    const triage = seedItem(db, { triageState: 'failed', failedFromState: 'drafting' });
+    db.insert(jobs)
+      .values({ type: 'draft', itemId: triage.id, payload: {}, status: 'failed', attempts: 1, runAfter: 0, createdAt: 0, updatedAt: 0 })
+      .run();
+    await runWithMap(db, 'retry', String(triage.id));
+    expect(getItem(db, triage.id)?.triageState).toBe('drafting');
+  });
+
   it('rejects fix-pr for an unknown position', async () => {
     const db = createTestDb();
     const item = seedItem(db, { linearIssueId: 'i1', linearIdentifier: 'BOO-1', workState: 'prs_open' });

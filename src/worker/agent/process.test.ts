@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runProcess } from './process';
+import { runProcess, spawnOptions } from './process';
 
 const node = process.execPath;
 
@@ -45,6 +45,27 @@ describe('runProcess', () => {
     setTimeout(() => controller.abort(), 150);
     const result = await runProcess(node, stubborn, { timeoutMs: 100, killGraceMs: 300, signal: controller.signal });
     expect(result).toMatchObject({ timedOut: true, aborted: true });
+  });
+
+  it('spawns children detached, in their own process group, so a terminal Ctrl-C does not reach them', async () => {
+    expect(spawnOptions({}).detached).toBe(true);
+    const result = await runProcess('sh', ['-c', 'echo $$ $(ps -o pgid= -p $$)']);
+    const [pid, pgid] = result.stdout.trim().split(/\s+/);
+    expect(pgid).toBe(pid);
+  });
+
+  it('reports the signal when the child is killed by one', async () => {
+    const result = await runProcess(node, ['-e', 'process.kill(process.pid,"SIGKILL")']);
+    expect(result).toMatchObject({ exitCode: -1, signal: 'SIGKILL', timedOut: false, aborted: false });
+  });
+
+  it('kills the whole process group on abort', async () => {
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 100);
+    const started = Date.now();
+    const result = await runProcess('sh', ['-c', 'sleep 30 & wait'], { signal: controller.signal, killGraceMs: 5000 });
+    expect(result.aborted).toBe(true);
+    expect(Date.now() - started).toBeLessThan(3000);
   });
 
   it('rejects with a TransientError when the command cannot start', async () => {

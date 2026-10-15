@@ -69,10 +69,15 @@ export class AgentLane {
     await Promise.allSettled([...this.inFlight.keys()]);
   }
 
-  /** Stops claiming, aborts in-flight runs (their jobs are requeued) and waits up to `timeoutMs` for them to finish. */
-  async shutdown(timeoutMs: number): Promise<{ timedOut: boolean }> {
+  /** Stops claiming and aborts in-flight runs (their jobs are requeued). Safe to call more than once. */
+  abort(): void {
     this.closed = true;
     this.shutdownController.abort();
+  }
+
+  /** Aborts (see `abort`) and waits up to `timeoutMs` for in-flight runs to finish. */
+  async shutdown(timeoutMs: number): Promise<{ timedOut: boolean }> {
+    this.abort();
     let timer: NodeJS.Timeout | undefined;
     const timeout = new Promise<'timeout'>((resolve) => {
       timer = setTimeout(() => resolve('timeout'), timeoutMs);

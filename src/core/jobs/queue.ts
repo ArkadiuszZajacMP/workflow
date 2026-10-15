@@ -211,6 +211,13 @@ export function requestStop(db: Db, jobId: number): void {
   db.update(jobs).set({ stopRequested: true }).where(eq(jobs.id, jobId)).run();
 }
 
+/** Asks the item's running agent job, if any, to stop. Returns that job. */
+export function requestAgentStop(db: Db, itemId: number): Job | undefined {
+  const job = runningAgentJob(db, itemId);
+  if (job) requestStop(db, job.id);
+  return job;
+}
+
 export function isStopRequested(db: Db, jobId: number): boolean {
   return db.select({ stop: jobs.stopRequested }).from(jobs).where(eq(jobs.id, jobId)).get()?.stop ?? false;
 }

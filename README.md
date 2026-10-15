@@ -35,7 +35,8 @@ Flow:
 - Review the plan and its PR breakdown, edit or revise it, then **Approve plan**. The plan is posted as a Linear comment and implementation starts.
 - One draft PR is opened per breakdown row, in order. When all are open, the item moves to Verification.
 - PR cards and the sheet show CI and unresolved review threads. **Fix with Claude** runs one fix round for a PR.
-- **Stop run** kills the current run. **Retry work** resumes a failed step. Workspaces are removed 7 days after an item is done or dismissed, or with **Remove workspace**.
+- **Stop run** kills the current run (also after the item is dismissed; dismissing an item asks its running agent to stop). **Retry work** resumes a failed step (`npm run queue -- retry <id>` does the same for failed work). Workspaces are removed `agent.workspaceRetentionDays` (default 7) days after an item is done or dismissed, or with **Remove workspace**.
+- `npm run dev` restarts the worker whenever its source changes, which stops in-flight agent runs and requeues them. Don't edit code under this worktree while agents are running. Ctrl-C stops the worker the same way: runs are stopped and requeued (press Ctrl-C twice to exit without waiting).
 
 ## Tests
 

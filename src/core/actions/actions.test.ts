@@ -201,6 +201,14 @@ describe('retry', () => {
     expect(allJobs()).toMatchObject([{ id: claimed.id, status: 'queued', attempts: 0 }]);
   });
 
+  it('never requeues a failed agent job, only a failed triage job', () => {
+    const item = seedItem(db, { triageState: 'failed', failedFromState: 'drafting' });
+    enqueueJob(db, 'investigate', item.id, {}, 0);
+    failJob(db, claimNextJob(db, 0)!, new PermanentError('boom'), 0);
+    expect(() => retry(db, item.id, 10)).toThrow(/no failed job/);
+    expect(allJobs()).toMatchObject([{ type: 'investigate', status: 'failed' }]);
+  });
+
   it('refuses to retry items that have not failed', () => {
     const item = draftReadyItem();
     expect(() => retry(db, item.id)).toThrow(ActionError);

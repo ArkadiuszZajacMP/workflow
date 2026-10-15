@@ -34,7 +34,8 @@ async function setupHome(deps: AgentDeps, container: string): Promise<void> {
   const settings: [string, string][] = [
     ['user.name', identity.name],
     ['user.email', identity.email],
-    ['credential.helper', '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'],
+    // Scoped to GitHub so GH_TOKEN is never offered to any other host.
+    ['credential.https://github.com.helper', '!f() { echo username=x-access-token; echo "password=$GH_TOKEN"; }; f'],
   ];
   for (const [key, value] of settings) {
     const result = await deps.engine.exec({ container, args: ['git', 'config', '--global', key, value] });
@@ -44,8 +45,11 @@ async function setupHome(deps: AgentDeps, container: string): Promise<void> {
 
 async function prepareRepo(deps: AgentDeps, container: string, repo: RepoEntry): Promise<void> {
   const dir = `/work/${repo.key}`;
-  const exists = await deps.engine.exec({ container, args: ['test', '-d', `${dir}/.git`] });
-  if (exists.exitCode !== 0) {
+  // A clone interrupted half-way leaves a `.git` without a HEAD; only a checked-out repo counts as cloned.
+  const head = await deps.engine.exec({ container, args: ['git', '-C', dir, 'rev-parse', '--verify', '--quiet', 'HEAD'] });
+  if (head.exitCode !== 0) {
+    const cleared = await deps.engine.exec({ container, args: ['rm', '-rf', dir] });
+    if (cleared.exitCode !== 0) throw new PermanentError(`Could not clear ${dir}: ${cleared.stderr.trim().slice(-500)}`);
     const clone = await deps.engine.exec({
       container,
       env: { GH_TOKEN: deps.secrets.ghToken },
@@ -55,16 +59,21 @@ async function prepareRepo(deps: AgentDeps, container: string, repo: RepoEntry):
     if (clone.exitCode !== 0) throw new PermanentError(`git clone ${repo.repo} failed: ${clone.stderr.trim().slice(-500)}`);
   }
   if (repo.node) {
+    // A repo that tracks its own .tool-versions keeps it untouched; mise installs what it names.
+    const tracked = await deps.engine.exec({ container, args: ['git', '-C', dir, 'ls-files', '--error-unmatch', '.tool-versions'] });
     const tools = await deps.engine.exec({
       container,
       workdir: dir,
-      args: [
-        'sh',
-        '-c',
-        'printf "node %s\\n" "$1" > .tool-versions && (grep -qx .tool-versions .git/info/exclude || echo .tool-versions >> .git/info/exclude) && mise install',
-        'sh',
-        repo.node,
-      ],
+      args:
+        tracked.exitCode === 0
+          ? ['mise', 'install']
+          : [
+              'sh',
+              '-c',
+              'printf "node %s\\n" "$1" > .tool-versions && (grep -qx .tool-versions .git/info/exclude || echo .tool-versions >> .git/info/exclude) && mise install',
+              'sh',
+              repo.node,
+            ],
       timeoutMs: INSTALL_TIMEOUT_MS,
     });
     if (tools.exitCode !== 0) throw new PermanentError(`mise install failed in ${repo.key}: ${tools.stderr.trim().slice(-500)}`);

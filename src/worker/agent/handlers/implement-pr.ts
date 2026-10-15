@@ -3,12 +3,12 @@ import type { PullRequestInfo } from '@/core/clients/types';
 import type { Job, PlannedPr } from '@/core/db/schema';
 import { writeTransaction } from '@/core/db/tx';
 import { PermanentError } from '@/core/errors';
-import { getItem, logActivity, updateItem } from '@/core/items';
+import { getItem, logActivity } from '@/core/items';
 import { enqueueJob, hasActiveJobFor, jobPayload } from '@/core/jobs/queue';
 import { findRepo } from '@/core/repos/map';
 import { allPrsOpen, getPlannedPr, listPlannedPrs, nextPendingPr, updatePlannedPr } from '@/core/work/planned-prs';
 import { latestPlan } from '@/core/work/plans';
-import { applyWorkEvent } from '@/core/work/state';
+import { finishImplementation } from '@/core/work/state';
 import type { AgentDeps, AgentHandler } from '../deps';
 import { renderAgentPrompt } from '../prompts';
 import { runAgent } from '../run';
@@ -44,10 +44,7 @@ export function afterPrOpened(deps: AgentDeps, itemId: number): void {
       }
       return;
     }
-    if (!allPrsOpen(tx, itemId)) return;
-    applyWorkEvent(tx, itemId, { type: 'all_prs_open' }, deps.now());
-    updateItem(tx, itemId, { category: 'verification' }, deps.now());
-    logActivity(tx, itemId, 'All planned PRs are open; moved to Verification', deps.now());
+    if (allPrsOpen(tx, itemId)) finishImplementation(tx, itemId, deps.now());
   });
 }
 

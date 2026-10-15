@@ -3,8 +3,8 @@ import type { Db } from '../db/client';
 import type { Item, JobType, Plan } from '../db/schema';
 import { writeTransaction } from '../db/tx';
 import { ActionError } from '../errors';
-import { logActivity, updateItem } from '../items';
-import { enqueueJob, latestFailedJob, requestStop, requeueJob, runningAgentJob } from '../jobs/queue';
+import { logActivity, requireItem, updateItem } from '../items';
+import { enqueueJob, latestFailedJob, requestAgentStop, requeueJob } from '../jobs/queue';
 import { type RepoMap, validateBreakdown } from '../repos/map';
 import { getPlannedPr, updatePlannedPr } from '../work/planned-prs';
 import { cleanPlanContent, latestPlan, type PlanContent, savePlan } from '../work/plans';
@@ -103,6 +103,7 @@ export function fixPr(db: Db, itemId: number, plannedPrId: number, now = Date.no
     const pr = getPlannedPr(tx, plannedPrId);
     if (!pr || pr.itemId !== itemId) throw new ActionError(`PR #${plannedPrId} is not part of item #${itemId}`);
     if (pr.state !== 'open' || !pr.prNumber) throw new ActionError(`PR ${pr.position} is not open yet`);
+    if (pr.merged) throw new ActionError(`PR ${pr.position} is already merged`);
     assertNoActiveJob(tx, itemId);
     enqueueJob(tx, 'fix-pr', itemId, { plannedPrId }, now);
     logActivity(tx, itemId, `Fix round requested for ${pr.githubRepo}#${pr.prNumber}`, now);
@@ -110,12 +111,12 @@ export function fixPr(db: Db, itemId: number, plannedPrId: number, now = Date.no
   });
 }
 
+/** Works on dismissed items too: a run that is still going must always be stoppable. */
 export function stopRun(db: Db, itemId: number, now = Date.now()): Item {
   return writeTransaction(db, (tx) => {
-    const item = requireActiveItem(tx, itemId);
-    const job = runningAgentJob(tx, itemId);
+    const item = requireItem(tx, itemId);
+    const job = requestAgentStop(tx, itemId);
     if (!job) throw new ActionError(`No agent run is active for item #${itemId}`);
-    requestStop(tx, job.id);
     logActivity(tx, itemId, `Stop requested for ${job.type}`, now);
     return item;
   });

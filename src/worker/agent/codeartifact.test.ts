@@ -93,6 +93,12 @@ describe('withRegistryAuth', () => {
     expect(readFileSync(out, 'utf8')).toContain(`//h.example.com/npm/a'$(touch$IFS.INJECTED)'b/:_authToken=t`);
   });
 
+  it('removes the token files on exit and on INT, TERM and HUP', () => {
+    const script = withRegistryAuth(['true'], TEST_REPO_MAP.defaults.codeArtifactRegistry)[2]!;
+    expect(script).toContain('trap \'rm -f "$HOME/.npmrc" "$HOME/.yarnrc.yml"\' EXIT INT TERM HUP');
+    expect(script.indexOf('trap')).toBeLessThan(script.indexOf('> "$HOME/.npmrc"'));
+  });
+
   it('propagates the command exit code', async () => {
     const home = mkdtempSync(path.join(tmpdir(), 'ca-home-'));
     const args = withRegistryAuth(['sh', '-c', 'exit 7'], TEST_REPO_MAP.defaults.codeArtifactRegistry);

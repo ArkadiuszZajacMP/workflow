@@ -24,6 +24,13 @@ export interface ContainerEngine {
   remove(name: string): Promise<void>;
 }
 
+const PKILL_TIMEOUT_MS = 15_000;
+
+/** The exec client did not exit on its own: it was timed out, aborted or killed by a signal. */
+export function endedAbnormally(result: ProcessResult): boolean {
+  return result.timedOut || result.aborted || !!result.signal || result.exitCode < 0;
+}
+
 export function execArgs(req: ExecRequest): string[] {
   const args = ['exec', '-i'];
   if (req.workdir) args.push('-w', req.workdir);
@@ -72,9 +79,11 @@ export class PodmanEngine implements ContainerEngine {
       signal: req.signal,
       onLine: req.onLine,
     });
-    if (result.timedOut || result.aborted) {
+    if (endedAbnormally(result)) {
       // Killing the host `podman exec` client does not stop the command inside the container.
-      await this.run(this.cmd, ['exec', req.container, 'pkill', '-TERM', '-f', 'claude']).catch(() => undefined);
+      await this.run(this.cmd, ['exec', req.container, 'pkill', '-TERM', '-f', 'claude'], { timeoutMs: PKILL_TIMEOUT_MS }).catch(
+        () => undefined,
+      );
     }
     return result;
   }
