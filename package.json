@@ -12,7 +12,9 @@
     "smoke": "bash scripts/with-secrets.sh node --import tsx scripts/smoke.ts",
     "seed:demo": "node --import tsx scripts/seed-demo.ts",
     "db:generate": "drizzle-kit generate",
+    "agent:build-image": "podman build -t workflow-agent:latest containers/agent",
     "test": "vitest run",
+    "test:podman": "vitest run --config vitest.podman.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
