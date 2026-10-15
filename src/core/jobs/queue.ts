@@ -80,7 +80,13 @@ export function failJob(db: Db, job: Job, err: unknown, now = Date.now()): 'resc
   if (transient && job.attempts < MAX_ATTEMPTS) {
     const retryAfter = err instanceof TransientError ? err.retryAfterMs : undefined;
     db.update(jobs)
-      .set({ status: 'queued', runAfter: now + backoffMs(job.attempts, retryAfter), lastError: message, updatedAt: now })
+      .set({
+        status: 'queued',
+        runAfter: now + backoffMs(job.attempts, retryAfter),
+        lastError: message,
+        stopRequested: false,
+        updatedAt: now,
+      })
       .where(eq(jobs.id, job.id))
       .run();
     return 'rescheduled';
@@ -151,7 +157,7 @@ export function recoverRunningJobs(db: Db, now = Date.now()): { requeued: number
     }
     const requeued = tx
       .update(jobs)
-      .set({ status: 'queued', runAfter: now, updatedAt: now })
+      .set({ status: 'queued', runAfter: now, stopRequested: false, updatedAt: now })
       .where(and(eq(jobs.status, 'running'), lt(jobs.attempts, MAX_ATTEMPTS)))
       .returning({ id: jobs.id })
       .all().length;

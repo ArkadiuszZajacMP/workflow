@@ -192,3 +192,33 @@ describe('typed claims and failure routing', () => {
     expect(isStopRequested(db, job.id)).toBe(true);
   });
 });
+
+describe('stop requests are cleared when a job is requeued', () => {
+  const claimStopped = () => {
+    const job = enqueueJob(db, 'implement-pr', itemId, { plannedPrId: 1 }, 0);
+    claimNextJob(db, 0);
+    requestStop(db, job.id);
+    expect(isStopRequested(db, job.id)).toBe(true);
+    return job;
+  };
+
+  it('on crash recovery', () => {
+    const job = claimStopped();
+    recoverRunningJobs(db, 10);
+    expect(getJob(job.id).status).toBe('queued');
+    expect(isStopRequested(db, job.id)).toBe(false);
+  });
+
+  it('on a transient reschedule', () => {
+    const job = claimStopped();
+    expect(failJob(db, getJob(job.id), new TransientError('busy'), 10)).toBe('rescheduled');
+    expect(getJob(job.id).status).toBe('queued');
+    expect(isStopRequested(db, job.id)).toBe(false);
+  });
+
+  it('on requeueJob', () => {
+    const job = claimStopped();
+    requeueJob(db, job.id, 10);
+    expect(isStopRequested(db, job.id)).toBe(false);
+  });
+});
