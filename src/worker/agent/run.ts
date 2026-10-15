@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import type { z } from 'zod';
@@ -13,16 +14,16 @@ import type { AgentDeps } from './deps';
 
 export const INVESTIGATE_TOOLS =
   'Read,Grep,Glob,Bash(git log:*),Bash(git show:*),Bash(git grep:*),Bash(git diff:*),Bash(ls:*)';
+const FORBIDDEN_INVESTIGATE_ENV = ['GH_TOKEN', 'CODEARTIFACT_AUTH_TOKEN'];
 const STOP_POLL_MS = 1_000;
 /** podman exec's own failures: container missing, not runnable, command not found. */
 const ENGINE_EXIT_CODES = new Set([125, 126, 127]);
 
 export function claudeArgs(
   kind: AgentRunKind,
-  prompt: string,
   opts: { maxTurns: number; model: string | null; resume?: string },
 ): string[] {
-  const args = ['claude', '-p', prompt, '--output-format', 'stream-json', '--verbose', '--max-turns', String(opts.maxTurns)];
+  const args = ['claude', '-p', '--output-format', 'stream-json', '--verbose', '--max-turns', String(opts.maxTurns)];
   if (kind === 'investigate') args.push('--allowedTools', INVESTIGATE_TOOLS);
   else args.push('--dangerously-skip-permissions');
   if (opts.model) args.push('--model', opts.model);
@@ -76,13 +77,16 @@ function summarize(value: unknown): string {
  */
 export async function runAgent<T>(deps: AgentDeps, req: AgentRunRequest<T>): Promise<T> {
   if (!req.item.linearIdentifier) throw new PermanentError(`Item #${req.item.id} has no Linear issue`);
+  if (req.kind === 'investigate' && FORBIDDEN_INVESTIGATE_ENV.some((name) => name in req.env)) {
+    throw new PermanentError('Investigation runs must not receive push or registry tokens');
+  }
   const cfg = deps.config.agent;
   const investigate = req.kind === 'investigate';
   const timeoutMs = (investigate ? cfg.timeoutMinutes.investigate : cfg.timeoutMinutes.implement) * 60_000;
   const maxTurns = investigate ? cfg.maxTurns.investigate : cfg.maxTurns.implement;
   const container = workspaceName(req.item.linearIdentifier);
   mkdirSync(deps.runsDir, { recursive: true });
-  const logPath = path.join(deps.runsDir, `${req.job.id}-${deps.now()}.jsonl`);
+  const logPath = path.join(deps.runsDir, `${req.job.id}-${deps.now()}-${randomUUID().slice(0, 8)}.jsonl`);
   const run = startRun(
     deps.db,
     { jobId: req.job.id, itemId: req.item.id, plannedPrId: req.plannedPrId ?? null, kind: req.kind, logPath },
@@ -90,16 +94,21 @@ export async function runAgent<T>(deps: AgentDeps, req: AgentRunRequest<T>): Pro
   );
   const controller = new AbortController();
   const stopTimer = setInterval(() => {
-    if (isStopRequested(deps.db, req.job.id)) controller.abort();
+    try {
+      if (isStopRequested(deps.db, req.job.id)) controller.abort();
+    } catch {
+      // A transient DB error must not crash the worker; the next tick retries.
+    }
   }, STOP_POLL_MS);
 
   const exec = async (prompt: string, resume?: string): Promise<Final> => {
-    const base = claudeArgs(req.kind, prompt, { maxTurns, model: deps.config.claude.model, resume });
+    const base = claudeArgs(req.kind, { maxTurns, model: deps.config.claude.model, resume });
     const seen: { final: Final | null } = { final: null };
     const result = await deps.engine.exec({
       container,
       workdir: '/work',
       env: req.env,
+      stdin: prompt,
       args: req.registry ? withRegistryAuth(base, req.registry) : base,
       timeoutMs,
       signal: controller.signal,

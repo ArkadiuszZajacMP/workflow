@@ -30,11 +30,11 @@ function setup(kind: 'investigate' | 'implement-pr' = 'investigate') {
 
 describe('claudeArgs', () => {
   it('limits investigation to read-only tools and lets implementation run unattended', () => {
-    expect(claudeArgs('investigate', 'P', { maxTurns: 60, model: null })).toEqual([
-      'claude', '-p', 'P', '--output-format', 'stream-json', '--verbose', '--max-turns', '60', '--allowedTools', INVESTIGATE_TOOLS,
+    expect(claudeArgs('investigate', { maxTurns: 60, model: null })).toEqual([
+      'claude', '-p', '--output-format', 'stream-json', '--verbose', '--max-turns', '60', '--allowedTools', INVESTIGATE_TOOLS,
     ]);
-    expect(claudeArgs('implement-pr', 'P', { maxTurns: 200, model: 'claude-opus-5-5', resume: 's-1' })).toEqual([
-      'claude', '-p', 'P', '--output-format', 'stream-json', '--verbose', '--max-turns', '200', '--dangerously-skip-permissions',
+    expect(claudeArgs('implement-pr', { maxTurns: 200, model: 'claude-opus-5-5', resume: 's-1' })).toEqual([
+      'claude', '-p', '--output-format', 'stream-json', '--verbose', '--max-turns', '200', '--dangerously-skip-permissions',
       '--model', 'claude-opus-5-5', '--resume', 's-1',
     ]);
   });
@@ -55,6 +55,28 @@ describe('runAgent', () => {
     expect(readFileSync(run!.logPath, 'utf8').trim().split('\n')).toHaveLength(3);
   });
 
+  it('sends the prompt on stdin and keeps argv short', async () => {
+    const { deps, engine, item, job } = setup();
+    engine.replyClaude({ answer: 1 });
+    const prompt = '-x '.concat('a'.repeat(300_000));
+    await runAgent(deps, { job, item, kind: 'investigate', prompt, schema, env: {} });
+    const exec = engine.execs.find(isClaudeExec)!;
+    expect(exec.stdin).toBe(prompt);
+    expect(exec.args).not.toContain(prompt);
+    expect(exec.args.every((arg) => arg.length < 1024)).toBe(true);
+  });
+
+  it('refuses to give an investigation push or registry tokens', async () => {
+    const { deps, engine, item, job } = setup();
+    for (const name of ['GH_TOKEN', 'CODEARTIFACT_AUTH_TOKEN']) {
+      const err = await runAgent(deps, { job, item, kind: 'investigate', prompt: 'P', schema, env: { [name]: 'x' } }).catch((e) => e);
+      expect(err).toBeInstanceOf(PermanentError);
+      expect(err.message).toBe('Investigation runs must not receive push or registry tokens');
+    }
+    expect(engine.execs.filter(isClaudeExec)).toHaveLength(0);
+    expect(listRuns(db, item.id)).toHaveLength(0);
+  });
+
   it('wraps the command with registry auth when a registry is given', async () => {
     const { deps, engine, item, job } = setup('implement-pr');
     engine.replyClaude({ answer: 1 });
@@ -73,6 +95,9 @@ describe('runAgent', () => {
     engine.replyClaude('I could not decide', { answer: 7 });
     await expect(runAgent(deps, { job, item, kind: 'investigate', prompt: 'P', schema, env: {} })).resolves.toEqual({ answer: 7 });
     const second = engine.execs.filter(isClaudeExec)[1]!;
+    expect(second.stdin).toMatch(/could not be used/);
+    expect(listRuns(db, item.id)).toHaveLength(1);
+    expect(readFileSync(listRuns(db, item.id)[0]!.logPath, 'utf8').trim().split('\n')).toHaveLength(6);
     expect(second.args).toContain('--resume');
     expect(second.args).toContain('s-1');
 
@@ -96,6 +121,7 @@ describe('runAgent', () => {
     await expect(runAgent(deps, { job, item, kind: 'investigate', prompt: 'P', schema, env: {} })).rejects.toThrow(
       'Claude run ended with error_max_turns',
     );
+    expect(listRuns(db, item.id).map((r) => r.outcome).sort()).toEqual(['failed', 'timed_out']);
   });
 
   it('kills the run when a stop is requested', async () => {
@@ -118,6 +144,7 @@ describe('runAgent', () => {
       TransientError,
     );
     expect(getWorkspace(db, item.id)?.status).toBe('broken');
+    expect(listRuns(db, item.id)[0]?.outcome).toBe('failed');
   });
 
   it('passes the configured model', async () => {
