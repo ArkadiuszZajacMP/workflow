@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { Db } from '@/core/db/client';
-import { jobs } from '@/core/db/schema';
+import { eq } from 'drizzle-orm';
+import { items, jobs } from '@/core/db/schema';
 import { ActionError, PermanentError } from '@/core/errors';
 import { getItem } from '@/core/items';
 import { claimNextJob, enqueueJob, failJob, isStopRequested, recordJobFailure } from '@/core/jobs/queue';
@@ -86,6 +87,18 @@ describe('retryWork', () => {
     expect(retryWork(db, item.id, 3)).toMatchObject({ workState: 'implementing', workFailedFromState: null, lastError: null });
     expect(getPlannedPr(db, pr!.id)).toMatchObject({ state: 'pending', lastError: null });
     expect(queued()).toMatchObject([{ id: claimed.id, type: 'implement-pr', attempts: 0 }]);
+  });
+
+  it('derives the retry state from the job type when workFailedFromState is null', () => {
+    const item = linearItem({ workState: 'implementing' });
+    const p = savePlan(db, item.id, plan, 'user', null, 1);
+    const [pr] = createPlannedPrs(db, item, p, TEST_REPO_MAP, 1);
+    enqueueJob(db, 'implement-pr', item.id, { plannedPrId: pr!.id }, 1);
+    const claimed = claimNextJob(db, 1)!;
+    failJob(db, claimed, new PermanentError('boom'), 2);
+    recordJobFailure(db, claimed, { triage: null, work: 'implementing' }, 'boom', 2);
+    db.update(items).set({ workFailedFromState: null }).where(eq(items.id, item.id)).run();
+    expect(retryWork(db, item.id, 3).workState).toBe('implementing');
   });
 
   it('refuses when work has not failed', () => {

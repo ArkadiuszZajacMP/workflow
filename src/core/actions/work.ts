@@ -14,6 +14,12 @@ import { assertNoActiveJob, requireActiveItem } from './guards';
 
 const WORK_JOB_TYPES: readonly JobType[] = ['investigate', 'post-plan', 'implement-pr'];
 
+const RETRY_STATE_FOR_JOB = {
+  investigate: 'investigating',
+  'post-plan': 'posting_plan',
+  'implement-pr': 'implementing',
+} as const;
+
 export function startInvestigation(db: Db, itemId: number, now = Date.now()): Item {
   return writeTransaction(db, (tx) => {
     const item = requireActiveItem(tx, itemId);
@@ -81,7 +87,7 @@ export function retryWork(db: Db, itemId: number, now = Date.now()): Item {
       const { plannedPrId } = job.payload as { plannedPrId: number };
       updatePlannedPr(tx, plannedPrId, { state: 'pending', lastError: null }, now);
     }
-    applyWorkEvent(tx, itemId, { type: 'retry', to: item.workFailedFromState ?? 'investigating' }, now);
+    applyWorkEvent(tx, itemId, { type: 'retry', to: item.workFailedFromState ?? RETRY_STATE_FOR_JOB[job.type as keyof typeof RETRY_STATE_FOR_JOB] }, now);
     requeueJob(tx, job.id, now);
     logActivity(tx, itemId, `Retrying ${job.type}`, now);
     return updateItem(tx, itemId, { workFailedFromState: null, lastError: null }, now);
