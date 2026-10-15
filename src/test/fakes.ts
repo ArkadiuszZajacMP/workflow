@@ -18,6 +18,7 @@ import type {
 import { type Config, configSchema } from '@/core/config/schema';
 import { PermanentError, TransientError } from '@/core/errors';
 import type { LinearIssueRef, ThreadMessage } from '@/core/types';
+import type { HostTools } from '@/worker/agent/host';
 
 export const TEST_CONFIG: Config = configSchema.parse({
   linear: { defaultTeam: 'ENG' },
@@ -261,5 +262,27 @@ export class FakeGitHub implements GitHubClient {
   async failingChecks(repo: string, number: number) {
     this.maybeFail('failingChecks');
     return this.checks.get(`${repo}#${number}`) ?? [];
+  }
+}
+
+export class FakeHost implements HostTools {
+  identity = { name: 'Arek Z', email: 'arek@example.com' };
+  envDirs = new Map<string, string>();
+  detected: string | null = 'core';
+  syncCalls: string[] = [];
+  detectCalls: unknown[] = [];
+
+  async gitIdentity() {
+    return this.identity;
+  }
+
+  async syncEnv(repoKey: string) {
+    this.syncCalls.push(repoKey);
+    return this.envDirs.get(repoKey) ?? null;
+  }
+
+  async detectRepository(issue: unknown) {
+    this.detectCalls.push(issue);
+    return this.detected;
   }
 }
