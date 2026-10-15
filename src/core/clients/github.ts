@@ -60,10 +60,17 @@ export function createGitHubClient(token: string, fetchImpl: typeof fetch = fetc
       if (name === 'TimeoutError' || name === 'AbortError') throw new TransientError(`GitHub request timed out after ${GITHUB_TIMEOUT_MS / 1000}s`);
       throw new TransientError(`GitHub request failed: ${errorMessage(err)}`);
     }
-    if (res.status === 429 || (res.status === 403 && res.headers.get('x-ratelimit-remaining') === '0')) {
+    const retryAfterHeader = res.headers.get('retry-after');
+    const rateLimited =
+      res.status === 429 ||
+      (res.status === 403 && (res.headers.get('x-ratelimit-remaining') === '0' || retryAfterHeader !== null));
+    if (rateLimited) {
+      const retryAfterSec = Number(retryAfterHeader);
       const reset = Number(res.headers.get('x-ratelimit-reset'));
-      const retryAfter = Number.isFinite(reset) && reset > 0 ? Math.max(0, reset * 1000 - Date.now()) : 60_000;
-      throw new TransientError('GitHub rate limited', Math.min(retryAfter, 15 * 60_000));
+      let delay = 60_000;
+      if (retryAfterHeader !== null && Number.isFinite(retryAfterSec) && retryAfterSec >= 0) delay = retryAfterSec * 1000;
+      else if (Number.isFinite(reset) && reset > 0) delay = Math.max(0, reset * 1000 - Date.now());
+      throw new TransientError('GitHub rate limited', Math.min(delay, 15 * 60_000));
     }
     if (res.status >= 500) throw new TransientError(`GitHub server error ${res.status}`);
     if (res.status === 401) throw new PermanentError('GitHub authentication failed (check GITHUB_TOKEN)');
@@ -84,6 +91,8 @@ export function createGitHubClient(token: string, fetchImpl: typeof fetch = fetc
     if (body.errors?.length) {
       const message = body.errors.map((e) => e.message).join('; ');
       if (body.errors.some((e) => e.type === 'RATE_LIMITED')) throw new TransientError(`GitHub rate limited: ${message}`, 60_000);
+      // A missing PR or repo comes back as NOT_FOUND with the rest of the data still present.
+      if (body.data && body.errors.every((e) => e.type === 'NOT_FOUND')) return body.data;
       throw new PermanentError(`GitHub API error: ${message}`);
     }
     if (!body.data) throw new PermanentError('GitHub returned no data');
@@ -191,8 +200,10 @@ export function createGitHubClient(token: string, fetchImpl: typeof fetch = fetc
         if (run.app?.slug === 'github-actions') {
           try {
             const log = await (await request(`${API}/repos/${repo}/actions/jobs/${run.id}/logs`)).text();
-            logTail = log.split('\n').slice(-200).join('\n');
-          } catch {
+            logTail = log.replace(/\n$/, '').split('\n').slice(-200).join('\n');
+          } catch (err) {
+            // Only expired or missing logs are expected here; transient failures must reach the caller.
+            if (err instanceof TransientError) throw err;
             logTail = '';
           }
         }

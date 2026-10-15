@@ -135,3 +135,79 @@ describe('mapCiState', () => {
     ]);
   });
 });
+
+describe('fix round 1', () => {
+  it('returns null for a missing PR reported as NOT_FOUND alongside data', async () => {
+    const f = fakeFetch({
+      body: {
+        data: { repository: { pullRequest: null } },
+        errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a PullRequest' }],
+      },
+    });
+    await expect(client(f).getPullRequest('acme/core', 99)).resolves.toBeNull();
+  });
+
+  it('keeps the other PRs of a status batch when one is NOT_FOUND', async () => {
+    const node = { pullRequest: { isDraft: false, merged: false, state: 'OPEN', reviewThreads: { nodes: [] }, commits: { nodes: [] } } };
+    const f = fakeFetch({
+      body: {
+        data: { p0: node, p1: null },
+        errors: [{ type: 'NOT_FOUND', message: 'Could not resolve to a Repository' }],
+      },
+    });
+    const result = await client(f).prStatuses([
+      { repo: 'acme/core', number: 12 },
+      { repo: 'acme/gone', number: 3 },
+    ]);
+    expect([...result.keys()]).toEqual([prKey('acme/core', 12)]);
+  });
+
+  it('still throws a permanent error for NOT_FOUND without data', async () => {
+    const f = fakeFetch({ body: { errors: [{ type: 'NOT_FOUND', message: 'Gone' }] } });
+    await expect(client(f).viewer()).rejects.toBeInstanceOf(PermanentError);
+  });
+
+  it('honours retry-after on a 403 secondary rate limit', async () => {
+    const f = fakeFetch({ status: 403, body: { message: 'secondary' }, headers: { 'retry-after': '30', 'x-ratelimit-remaining': '5000' } });
+    const err = await client(f).viewer().catch((e) => e);
+    expect(err).toBeInstanceOf(TransientError);
+    expect((err as TransientError).retryAfterMs).toBe(30_000);
+  });
+
+  it('honours retry-after on a 429', async () => {
+    const f = fakeFetch({ status: 429, body: { message: 'slow down' }, headers: { 'retry-after': '12' } });
+    const err = await client(f).viewer().catch((e) => e);
+    expect(err).toBeInstanceOf(TransientError);
+    expect((err as TransientError).retryAfterMs).toBe(12_000);
+  });
+
+  it('rejects when the Actions log fetch hits a transient error', async () => {
+    const f = fakeFetch(
+      { body: { data: { repository: { pullRequest: prNode } } } },
+      { body: { check_runs: [{ id: 7, name: 'lint', conclusion: 'failure', app: { slug: 'github-actions' }, output: {} }] } },
+      { status: 502 },
+    );
+    await expect(client(f).failingChecks('acme/core', 12)).rejects.toBeInstanceOf(TransientError);
+  });
+
+  it('gives an empty log tail when the log is expired (404)', async () => {
+    const f = fakeFetch(
+      { body: { data: { repository: { pullRequest: prNode } } } },
+      { body: { check_runs: [{ id: 7, name: 'lint', conclusion: 'failure', app: { slug: 'github-actions' }, output: {} }] } },
+      { status: 404, body: { message: 'Not Found' } },
+    );
+    await expect(client(f).failingChecks('acme/core', 12)).resolves.toEqual([{ name: 'lint', summary: '', logTail: '' }]);
+  });
+
+  it('ignores a trailing newline when taking the 200-line tail', async () => {
+    const log = Array.from({ length: 250 }, (_, i) => `line ${i}`).join('\n') + '\n';
+    const f = fakeFetch(
+      { body: { data: { repository: { pullRequest: prNode } } } },
+      { body: { check_runs: [{ id: 7, name: 'lint', conclusion: 'failure', app: { slug: 'github-actions' }, output: {} }] } },
+      { text: log },
+    );
+    const [check] = await client(f).failingChecks('acme/core', 12);
+    expect(check!.logTail.split('\n')).toHaveLength(200);
+    expect(check!.logTail.endsWith('line 249')).toBe(true);
+  });
+});
