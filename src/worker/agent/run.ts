@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { extractJson } from '@/core/clients/claude';
 import type { AgentRunKind, Item, Job } from '@/core/db/schema';
 import { errorMessage, PermanentError, TransientError } from '@/core/errors';
@@ -63,7 +63,7 @@ function parseResult<T>(text: string, schema: z.ZodType<T>): { ok: true; value: 
     return { ok: false, error: errorMessage(err) };
   }
   const result = schema.safeParse(raw);
-  return result.success ? { ok: true, value: result.data } : { ok: false, error: result.error.message };
+  return result.success ? { ok: true, value: result.data } : { ok: false, error: z.prettifyError(result.error) };
 }
 
 function summarize(value: unknown): string {

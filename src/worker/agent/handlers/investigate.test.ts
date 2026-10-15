@@ -57,6 +57,14 @@ describe('investigateHandler', () => {
     expect(prompt).toContain('Repository keys you may use in the breakdown: core, web, infra');
   });
 
+  it('includes Linear comments in the prompt', async () => {
+    const { deps, engine, job, linear } = setup();
+    linear.details.get('i1')!.comments = ['Seen on staging too'];
+    engine.replyClaude(output);
+    await investigateHandler(deps, job);
+    expect(engine.execs.find(isClaudeExec)!.stdin).toContain('Seen on staging too');
+  });
+
   it('revises using the previous plan, its repos and the feedback', async () => {
     const { deps, engine, host, item, job } = (() => {
       const env = setup({ feedback: 'split the UI change out' });
@@ -93,7 +101,7 @@ describe('investigateHandler', () => {
     engine.replyClaude(bad, bad);
     const err = await investigateHandler(deps, job).catch((e) => e);
     expect(err).toBeInstanceOf(PermanentError);
-    expect(err.message).toMatch(/unknown repository \\"mobile\\"/);
+    expect(err.message).toContain('unknown repository "mobile"');
   });
 
   it('does nothing for a dismissed item, and saves nothing if dismissed during the run', async () => {

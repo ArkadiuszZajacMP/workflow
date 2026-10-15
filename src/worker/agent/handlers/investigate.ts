@@ -55,6 +55,7 @@ export const investigateHandler: AgentHandler = async (deps, job: Job) => {
     identifier: issue.identifier,
     title: issue.title,
     description: issue.description || '(no description)',
+    comments: issue.comments.length ? issue.comments.map((c, i) => `--- comment ${i + 1} ---\n${c}`).join('\n\n') : '(none)',
     thread: item.slackThread?.length ? formatThread(item.slackThread) : '(none)',
     repos: repos.map((key) => `- ${key} (/work/${key})`).join('\n'),
     knownRepos: map.repos.map((r) => r.key).join(', '),

@@ -105,6 +105,7 @@ describe('runAgent', () => {
     const err = await runAgent(deps, { job, item, kind: 'investigate', prompt: 'P', schema, env: {} }).catch((e) => e);
     expect(err).toBeInstanceOf(PermanentError);
     expect(err.message).toMatch(/invalid output twice/);
+    expect(err.message).not.toContain('\\"');
   });
 
   it('records timeouts and error results as permanent failures', async () => {

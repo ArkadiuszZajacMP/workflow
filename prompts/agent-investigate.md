@@ -7,6 +7,10 @@ You are investigating a Linear issue in MeetingPackage's code so a developer can
 </description>
 </issue>
 
+<issue_comments>
+{{comments}}
+</issue_comments>
+
 <slack_thread>
 {{thread}}
 </slack_thread>
