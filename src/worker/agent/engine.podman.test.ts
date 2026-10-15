@@ -18,6 +18,7 @@ describe('PodmanEngine (real podman)', () => {
     expect(version.exitCode).toBe(0);
     expect(version.stdout).toMatch(/Claude Code/);
     const whoami = await engine.exec({ container: name, args: ['sh', '-c', 'id -u && echo $HOME && touch /work/ok && ls /work'] });
+    expect(whoami.stdout.split('\n')[0]).toBe('1000');
     expect(whoami.stdout).toContain('/home/node');
     expect(whoami.stdout).toContain('ok');
   });

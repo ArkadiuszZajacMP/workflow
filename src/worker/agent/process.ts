@@ -9,6 +9,8 @@ export type ProcessOptions = {
   signal?: AbortSignal;
   onLine?: (line: string) => void;
   cwd?: string;
+  /** Time between SIGTERM and SIGKILL. Defaults to KILL_GRACE_MS. */
+  killGraceMs?: number;
 };
 export type Runner = (cmd: string, args: string[], opts?: ProcessOptions) => Promise<ProcessResult>;
 
@@ -26,8 +28,10 @@ export const runProcess: Runner = (cmd, args, opts = {}) =>
     let killTimer: NodeJS.Timeout | undefined;
 
     const kill = () => {
+      if (killTimer) return;
       child.kill('SIGTERM');
-      killTimer = setTimeout(() => child.kill('SIGKILL'), KILL_GRACE_MS);
+      killTimer = setTimeout(() => child.kill('SIGKILL'), opts.killGraceMs ?? KILL_GRACE_MS);
+      killTimer.unref();
     };
     const timer = opts.timeoutMs
       ? setTimeout(() => {
@@ -49,8 +53,9 @@ export const runProcess: Runner = (cmd, args, opts = {}) =>
       opts.signal?.removeEventListener('abort', onAbort);
     };
 
-    child.stdout.on('data', (chunk: Buffer) => {
-      const text = chunk.toString();
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (text: string) => {
       stdout += text;
       if (!opts.onLine) return;
       pending += text;
@@ -62,8 +67,8 @@ export const runProcess: Runner = (cmd, args, opts = {}) =>
         index = pending.indexOf('\n');
       }
     });
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString();
+    child.stderr.on('data', (text: string) => {
+      stderr += text;
     });
     child.on('error', (err) => {
       cleanup();

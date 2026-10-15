@@ -64,14 +64,19 @@ export class PodmanEngine implements ContainerEngine {
     return { created: false };
   }
 
-  exec(req: ExecRequest): Promise<ProcessResult> {
-    return this.run(this.cmd, execArgs(req), {
+  async exec(req: ExecRequest): Promise<ProcessResult> {
+    const result = await this.run(this.cmd, execArgs(req), {
       env: req.env,
       stdin: req.stdin,
       timeoutMs: req.timeoutMs,
       signal: req.signal,
       onLine: req.onLine,
     });
+    if (result.timedOut || result.aborted) {
+      // Killing the host `podman exec` client does not stop the command inside the container.
+      await this.run(this.cmd, ['exec', req.container, 'pkill', '-TERM', '-f', 'claude']).catch(() => undefined);
+    }
+    return result;
   }
 
   async copyInto(container: string, hostPath: string, containerPath: string): Promise<void> {

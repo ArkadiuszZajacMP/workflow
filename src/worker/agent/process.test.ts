@@ -23,6 +23,30 @@ describe('runProcess', () => {
     await expect(runProcess(node, slow, { signal: controller.signal })).resolves.toMatchObject({ aborted: true });
   });
 
+  it('decodes multi-byte characters split across chunks', async () => {
+    const lines: string[] = [];
+    const script =
+      'const b=Buffer.from("zażółć 🎉\\n");let i=0;const t=setInterval(()=>{if(i>=b.length){clearInterval(t);return}process.stdout.write(b.subarray(i,++i))},5)';
+    const result = await runProcess(node, ['-e', script], { onLine: (l) => lines.push(l) });
+    expect(lines).toEqual(['zażółć 🎉']);
+    expect(result.stdout).toBe('zażółć 🎉\n');
+  });
+
+  it('escalates to SIGKILL when the child ignores SIGTERM', async () => {
+    const stubborn = ['-e', 'process.on("SIGTERM",()=>{});setTimeout(()=>{},60000)'];
+    const started = Date.now();
+    await expect(runProcess(node, stubborn, { timeoutMs: 100, killGraceMs: 200 })).resolves.toMatchObject({ timedOut: true });
+    expect(Date.now() - started).toBeLessThan(2000);
+  });
+
+  it('resolves when a timeout is followed by an abort', async () => {
+    const stubborn = ['-e', 'process.on("SIGTERM",()=>{});setTimeout(()=>{},60000)'];
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 150);
+    const result = await runProcess(node, stubborn, { timeoutMs: 100, killGraceMs: 300, signal: controller.signal });
+    expect(result).toMatchObject({ timedOut: true, aborted: true });
+  });
+
   it('rejects with a TransientError when the command cannot start', async () => {
     await expect(runProcess('/nonexistent/binary', [])).rejects.toThrow(/Could not start/);
   });

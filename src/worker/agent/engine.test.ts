@@ -50,4 +50,16 @@ describe('PodmanEngine', () => {
     expect(calls[0]?.opts?.env).toEqual({ CLAUDE_CODE_OAUTH_TOKEN: 't' });
     await expect(engine.copyInto('c', '/tmp/x', '/work/x')).rejects.toBeInstanceOf(TransientError);
   });
+  it('stops the command inside the container after an abort or timeout, best effort', async () => {
+    const aborted = { ...ok(), aborted: true };
+    const first = scripted({ exec: aborted });
+    await new PodmanEngine('podman', first.run).exec({ container: 'c', args: ['claude'] });
+    expect(first.calls.map((c) => c.args)).toEqual([
+      ['exec', '-i', 'c', 'claude'],
+      ['exec', 'c', 'pkill', '-TERM', '-f', 'claude'],
+    ]);
+    const second = scripted({});
+    await new PodmanEngine('podman', second.run).exec({ container: 'c', args: ['claude'] });
+    expect(second.calls).toHaveLength(1);
+  });
 });
