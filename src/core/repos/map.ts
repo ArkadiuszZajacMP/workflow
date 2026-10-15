@@ -55,7 +55,12 @@ export function loadRepoMap(skillDir: string): RepoMap {
   } catch (err) {
     throw new PermanentError(`Repository map ${file} is not valid JSON: ${errorMessage(err)}`);
   }
-  return parseRepoMap(raw);
+  try {
+    return parseRepoMap(raw);
+  } catch (err) {
+    const detail = errorMessage(err).replace(/^Invalid repository map: /, '');
+    throw new PermanentError(`Invalid repository map ${file}: ${detail}`);
+  }
 }
 
 export function findRepo(map: RepoMap, key: string): RepoEntry | undefined {

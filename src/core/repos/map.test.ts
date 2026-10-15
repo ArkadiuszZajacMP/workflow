@@ -42,6 +42,33 @@ describe('repo map', () => {
     expect(() => parseRepoMap({ repositories: 'x' })).toThrow(/Invalid repository map/);
   });
 
+  it('includes the file path when the file is schema-invalid', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'mp-skill-'));
+    mkdirSync(path.join(dir, 'config'));
+    const file = path.join(dir, 'config', 'repositories.json');
+    writeFileSync(file, '{"repositories":"x"}');
+    const err = (() => {
+      try {
+        loadRepoMap(dir);
+      } catch (e) {
+        return e;
+      }
+    })();
+    expect(err).toBeInstanceOf(PermanentError);
+    expect((err as Error).message).toContain(file);
+    expect((err as Error).message).toContain('Invalid repository map');
+  });
+
+  it('includes the file path when the file is not JSON', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'mp-skill-'));
+    mkdirSync(path.join(dir, 'config'));
+    const file = path.join(dir, 'config', 'repositories.json');
+    writeFileSync(file, 'not json');
+    expect(() => loadRepoMap(dir)).toThrow(PermanentError);
+    expect(() => loadRepoMap(dir)).toThrow(file);
+    expect(() => loadRepoMap(dir)).toThrow('not valid JSON');
+  });
+
   it('validates a breakdown against the map', () => {
     expect(validateBreakdown([], TEST_REPO_MAP)).toBe('The plan needs at least one PR in its breakdown');
     expect(validateBreakdown([{ repo: 'core', scope: '  ' }], TEST_REPO_MAP)).toBe('PR 1 has no scope');
