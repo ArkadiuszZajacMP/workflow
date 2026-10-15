@@ -1,0 +1,51 @@
+import type { RepoMap } from '@/core/repos/map';
+
+export const TEST_REPO_MAP: RepoMap = {
+  defaults: {
+    awsRegion: 'eu-west-2',
+    awsAccountId: '111122223333',
+    codeArtifactDomain: 'acme-npm',
+    codeArtifactRegistry: 'https://acme-npm-111122223333.d.codeartifact.eu-west-2.amazonaws.com/npm/acme-internal/',
+    awsProfile: 'Acme-Artifactory',
+  },
+  repos: [
+    {
+      key: 'core',
+      repo: 'acme/core',
+      url: 'https://github.com/acme/core.git',
+      defaultBranch: 'main',
+      type: 'node',
+      node: '24.16.0',
+      packageManager: 'yarn',
+      installCommand: 'yarn install',
+      awsProfile: 'core-artifactory',
+      validationCommands: ['yarn lint:quiet'],
+      envTargets: [{ document: '{environment}-core-dotenv', path: 'apps/core/.env' }],
+      aliases: ['core-api'],
+    },
+    {
+      key: 'web',
+      repo: 'acme/web',
+      url: 'https://github.com/acme/web.git',
+      defaultBranch: 'main',
+      type: 'node',
+      node: '22',
+      packageManager: 'npm',
+      installCommand: 'npm install',
+      validationCommands: ['npm run lint', 'npm test'],
+      envTargets: [],
+      aliases: [],
+    },
+    {
+      key: 'infra',
+      repo: 'acme/infra',
+      url: 'https://github.com/acme/infra.git',
+      defaultBranch: 'main',
+      type: 'terraform',
+      installCommand: '',
+      validationCommands: ['terraform fmt -check -recursive'],
+      envTargets: [],
+      aliases: [],
+    },
+  ],
+};
