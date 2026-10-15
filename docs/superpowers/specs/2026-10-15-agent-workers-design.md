@@ -137,6 +137,12 @@ Resolved from 1Password through `with-secrets.sh` into the worker's environment,
 
 `.env.op.example` gains the three references. `GH_TOKEN` and `GITHUB_TOKEN` may point to the same 1Password item.
 
+**AWS CodeArtifact (private npm registry).** Some repos (`mp-core`, `mp_dashboard`) install packages from CodeArtifact, using the repo's `awsProfile` from the map (falling back to `defaults.awsProfile`). AWS credentials **never** enter the container.
+- Before each install-capable exec (`prepare-workspace`, `implement-pr`, `fix-pr`) for a repo with an `awsProfile`, the worker runs `aws codeartifact get-authorization-token --domain <codeArtifactDomain> --domain-owner <awsAccountId> --region <awsRegion> --profile <awsProfile> --query authorizationToken --output text` on the host. The token is short-lived (about 12 h) and cached in memory until 30 minutes before it expires.
+- The token is passed into the exec as `CODEARTIFACT_AUTH_TOKEN`. A small in-container step writes `~/.npmrc` (`//<registry host+path>/:_authToken=${token}`) and `~/.yarnrc.yml` (`npmRegistries` entry for `defaults.codeArtifactRegistry` with `npmAuthToken` and `npmAlwaysAuth: true`) before the command, and deletes both files after it, so the token is not left on disk in the workspace.
+- Investigation runs never receive the token.
+- If the host `aws` call fails (expired SSO session, missing profile), the job fails permanently with the AWS error and a hint to run `aws sso login --profile <awsProfile>`.
+
 ### Cleanup
 
 The `workspace-gc` step runs on each poll cycle. It removes the container and volume of items that have been `done` or `dismissed` for more than `agent.workspaceRetentionDays` days (default 7). A **Remove workspace** action (UI and CLI) removes them immediately; it is refused while an agent run is active for the item.
@@ -243,7 +249,7 @@ podman exec -w /work --env CLAUDE_CODE_OAUTH_TOKEN [--env GH_TOKEN] wf-<key> \
 `jobs` gains a `stop_requested` integer column for `stopRun`.
 
 **`post-plan` job** (core lane)
-1. If `issue(id)` already has a comment with id `commentUuid`, skip to step 3. Linear's `commentCreate` accepts a client-supplied `id`. This is verified the same way as `IssueCreateInput.id`, from the published @linear/sdk types, before implementation.
+1. If `comment(id: commentUuid)` already exists, skip to step 3. Linear's `CommentCreateInput.id` accepts a client-supplied UUID v4 (verified in the published @linear/sdk 97.2.0 types).
 2. Otherwise call `commentCreate({ id: commentUuid, issueId, body })`, where the body is `## Implementation plan\n\n<body>\n\n### PR breakdown\n1. \`repo\` — scope\n…`.
 3. In one transaction:
    - record `plan_comment_id`;
